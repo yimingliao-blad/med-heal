@@ -1,0 +1,65 @@
+{
+  "raw": {
+    "ehrnoteqa_processed_jsonl": {
+      "source": {
+        "path": "/home/ra/Projects/llm-ehr-hallucination/output/EHRNoteQA_processed.jsonl",
+        "bytes": 10930992,
+        "sha256": "298ee6bb080d1d7393f15c10484336a7974c83d5c9636dfaabe6b245383a29b1"
+      },
+      "copy": {
+        "path": "/home/ra/Projects/med-heal/data/raw/EHRNoteQA_processed.jsonl",
+        "bytes": 10930992,
+        "sha256": "298ee6bb080d1d7393f15c10484336a7974c83d5c9636dfaabe6b245383a29b1"
+      }
+    },
+    "human_judgment_csv": {
+      "source": {
+        "path": "/home/ra/Projects/llm-ehr-hallucination/datasets/external/all_users_openended_BioMistral-7B_1775740232208.csv",
+        "bytes": 136894,
+        "sha256": "7fc64cf8b5d8f83c3b6ad2ec34ab216bc041072aa968da97f0bb08e16e596214"
+      },
+      "copy": {
+        "path": "/home/ra/Projects/med-heal/data/raw/all_users_openended_BioMistral-7B_1775740232208.csv",
+        "bytes": 136894,
+        "sha256": "7fc64cf8b5d8f83c3b6ad2ec34ab216bc041072aa968da97f0bb08e16e596214"
+      }
+    }
+  },
+  "processed": {
+    "human_gold_100": {
+      "source": {
+        "path": "/home/ra/Projects/llm-ehr-hallucination/output/step9_v2/sample100_gold_seed42.csv",
+        "bytes": 2732,
+        "sha256": "db16a2d58eb3755fe8e7a4bee7b42d79d1c5800970e1c887064d79b6a1d7644e"
+      },
+      "copy": {
+        "path": "/home/ra/Projects/med-heal/data/processed/human_gold_100_from_112_sara_jose_agreed.csv",
+        "bytes": 2732,
+        "sha256": "db16a2d58eb3755fe8e7a4bee7b42d79d1c5800970e1c887064d79b6a1d7644e"
+      }
+    },
+    "human_gold_200": {
+      "source": {
+        "path": "/home/ra/Projects/llm-ehr-hallucination/output/step9_v2/sample200_with_gold.csv",
+        "bytes": 5379,
+        "sha256": "5352295f493e62143b65905237cccac35b3120a3c467859011c91e80de9daea4"
+      },
+      "copy": {
+        "path": "/home/ra/Projects/med-heal/data/processed/human_gold_200_extended.csv",
+        "bytes": 5379,
+        "sha256": "5352295f493e62143b65905237cccac35b3120a3c467859011c91e80de9daea4"
+      }
+    }
+  },
+  "summary": {
+    "ehrnoteqa_rows": 962,
+    "human_judgment_rows": 788,
+    "human_gold_100_rows": 100,
+    "human_reviewers": [
+      "Caitlin Schwanke",
+      "Jose E. Lizarraga Mazab",
+      "Kushali darak",
+      "Sara Saif"
+    ]
+  }
+}

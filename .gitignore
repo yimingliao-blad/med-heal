@@ -1,0 +1,22 @@
+# Local data and run artifacts are intentionally excluded.
+# Use scripts/prepare_clean_project.py to recreate data copies from authorized local sources.
+/data/raw/*
+/data/processed/*
+/runs/*
+/output/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!runs/.gitkeep
+!output/.gitkeep
+__pycache__/
+*.py[cod]
+.env
+*.log
+.DS_Store
+
+# Legacy generated artifacts/results copied for local provenance but not for public deposit.
+/src/pre_atom/legacy/**/*.json
+/src/pre_atom/legacy/**/*.jsonl
+/src/pre_atom/legacy/**/*.csv
+/src/pre_atom/legacy/**/*.log
+/src/pre_atom/legacy/**/*.pdf

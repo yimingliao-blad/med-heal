@@ -1,0 +1,32 @@
+# Variation primitives shared across ICL steps.
+# Each primitive has:
+#   name    — unique label; matches a rule registered via @register_rule
+#   action  — human-readable description (also fed to LLM polisher as context)
+#   params  — optional kwargs for the rule implementation
+#
+# Category buckets (top-level keys): word_level, structural, constraint.
+# Add per-step overrides by creating variations/<step>.yaml.
+
+word_level:
+  - name: synonym_contradict
+    action: "Replace 'contradict' with 'conflict' or 'disagree with'"
+  - name: strengthen_verbs
+    action: "Tighten instruction verbs (e.g. 'check' → 'verify')"
+
+structural:
+  - name: add_write_own_answer_first
+    action: "Prepend: 'First, write your own correct answer. Then compare.'"
+  - name: remove_preamble
+    action: "Strip any lead-in sentences; start directly with the task."
+  - name: move_constraint_to_end
+    action: "Move format/output constraints to the end of the prompt."
+  - name: add_verification_question
+    action: "Append: 'Generate 3 verification questions; answer each from the notes.'"
+
+constraint:
+  - name: loosen_format
+    action: "Remove strict JSON/YAML requirement; allow free-form with markers."
+  - name: tighten_format
+    action: "Require strict output: 'VERDICT: CORRECT' or 'VERDICT: INCORRECT' on its own line."
+  - name: add_calibration_phrase
+    action: "Add: 'If unsure, answer CORRECT.' (bias toward precision)"

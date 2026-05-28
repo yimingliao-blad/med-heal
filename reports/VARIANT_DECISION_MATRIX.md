@@ -1,0 +1,18 @@
+# Variant Decision Matrix
+
+| Family | Variant | Status | Source | Evidence | Notes |
+|---|---|---|---|---|---|
+| baseline | `zeroshot`<br>Zero-shot | selected_baseline | `legacy/step8_multimodel_icl/generate_step8.py` | Full 5-fold Step 8 outputs exist for all main models. | Reference condition for all paired comparisons. |
+| baseline | `gtr_note_pos_k1`<br>RA-ICL positive note retrieval | candidate | `legacy/step8_multimodel_icl/generate_step8.py; legacy/pilot_12_ra_icl` | Step 8 and Pilot 12 compare retrieved positive examples. | Uses fold-specific correct pools and GTR note embeddings. |
+| baseline | `gtr_note_neg_k1`<br>RA-ICL negative retrieval | candidate | `legacy/step8_multimodel_icl/generate_step8.py` | Included in Step 8 and negative k-sweep. | Often useful as a mistake-to-avoid prompt; can hurt if over-applied. |
+| baseline | `gtr_note_posneg_k1`<br>Contrastive RA-ICL | candidate | `legacy/step8_multimodel_icl/generate_step8.py` | Step 8 compares positive+negative examples. | Keeps positive style and negative failure mode side by side. |
+| baseline | `cot_evidence`<br>Evidence-first CoT | candidate | `legacy/step8_multimodel_icl/generate_step8.py` | Full Step 8 condition. | Asks model to extract evidence before answer. |
+| baseline | `cot_conclusion`<br>Conclusion-first CoT | candidate | `legacy/step8_multimodel_icl/generate_step8.py` | Full Step 8 condition. | Asks model to answer first, then explain. |
+| baseline | `multiturn`<br>Multi-turn few-shot | pilot_candidate | `legacy/step8_multimodel_icl/generate_step8.py` | Full Step 8 condition. | Uses chat-template multiturn demonstration where supported. |
+| judge | `gpt4o_stage1_binary_T0`<br>Trusted GPT-4o binary judge | selected_judge | `legacy/step9_self_correction/v2/judge.py; legacy/ichl/judges/gpt4o_stage1_binary_judge.py` | Validated against human A∩B gold subset; target >=92% agreement and kappa >=0.74. | Use for final paired labels and corrected-answer labels. |
+| judge | `legacy_step8_T01`<br>Legacy Step 8 GPT-4o judge | legacy | `legacy/step8_multimodel_icl/evaluate_step8_binary.py` | Existing Step 8 evaluated CSVs use this in many places. | Retained for provenance and label-drift comparison. |
+| correction | `step9_v2_D2_union_V2`<br>D2 detection + union evidence retrieval + V2 verdict | selected_current | `legacy/step9_self_correction/v2/run_pipeline.py; multi_model_pilot.py` | Latest pre-atom implementation with audit logs and evidence quote verification. | Canonical implementation for refactor execution. |
+| correction | `regen_count_compare`<br>Zero-shot regeneration + count-compare verdict | candidate | `legacy/step9_self_correction/v2/regen_pilot.py` | Pilot/fullscale outputs exist under output/step9_v2/multi_model. | No detection gate; useful shoulder-by-shoulder against guided correction. |
+| correction | `regen_v3_reconciled`<br>Regeneration V3 reconciled verdict | pilot_candidate | `legacy/step9_self_correction/v2/regen_v3_pilot.py; reconcile_v3.py` | Reconciles old regex/Qwen3 disagreement rule after pilot runs. | Included as pilot evidence, not default final. |
+| correction | `error_taxonomy_S1_P1Pool_V1`<br>Older S1/P1+Pool/V1 taxonomy pipeline | legacy_reference | `legacy/step9_self_correction/error_taxonomy` | Written final-results doc exists; some tests differ from v2. | Preserved for comparison and prompt provenance. |
+| prompt_engineering | `ichl_detection_correction_verdict`<br>ICHL prompt-engineering variants | pilot_family | `legacy/ichl/prompt_engineering` | Contains prompt seeds, correction sub-variants, parser pilots, and fullscale scripts. | Use decision matrix before promoting any sub-variant to selected. |

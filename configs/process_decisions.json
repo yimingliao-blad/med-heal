@@ -1,0 +1,209 @@
+{
+  "status": "draft_decision_map",
+  "stages": {
+    "dataset_generation": {
+      "selected_code_source": "processed_artifact_start",
+      "candidate_code_sources": [
+        "src/step1_preprocessing/preprocess.py",
+        "src/step1_preprocessing/create_split.py"
+      ],
+      "candidate_artifacts": [
+        "output/EHRNoteQA_processed.jsonl",
+        "output/EHRNoteQA_split_train.jsonl",
+        "output/EHRNoteQA_split_test.jsonl",
+        "output/folds/fold_*/test.jsonl"
+      ],
+      "decision_needed": "resolved: final refactor starts from output/EHRNoteQA_processed.jsonl; raw preprocessing remains provenance only",
+      "selected_input_artifacts": [
+        "output/EHRNoteQA_processed.jsonl"
+      ],
+      "selected_output_schema": "jsonl records from existing EHRNoteQA_processed artifact; downstream code preserves relative output/folds and output/step* folder structure",
+      "selected_metric_or_label_definition": "not applicable for dataset start point",
+      "legacy_sources_to_keep_for_comparison": [
+        "src/step1_preprocessing/preprocess.py",
+        "src/step1_preprocessing/create_split.py"
+      ]
+    },
+    "zeroshot_generation": {
+      "selected_code_source": "src/step8_multimodel_icl/generate_step8.py",
+      "candidate_code_sources": [
+        "src/step8_multimodel_icl/generate_step8.py",
+        "src/step2_benchmarking/generate_biomistral.py",
+        "src/step2_benchmarking/generate_qwen.py",
+        "src/step2_benchmarking/generate_meditron.py"
+      ],
+      "candidate_artifacts": [
+        "output/step8/<model>/fold_*/zeroshot_generated.csv",
+        "output/ours_*_EHRNoteQA_processed.csv"
+      ],
+      "decision_needed": "resolved: use shared Step 8 script for BioMistral, Qwen2.5, Qwen3, DeepSeek, and Llama3; BioMistral remains the start/reference model",
+      "selected_input_artifacts": [
+        "output/EHRNoteQA_processed.jsonl",
+        "output/folds/fold_*/test.jsonl"
+      ],
+      "selected_output_schema": "output/step8/<model>/fold_<k>/<condition>_generated.csv with shared columns idx, patient_id, fold_id, question, ground_truth, model_answer, model, method, retrieval_sim_score, prompt_length, answer_length",
+      "selected_metric_or_label_definition": "generation only; correctness is assigned later by selected judge",
+      "model_order": [
+        "biomistral-7b",
+        "qwen2.5-7b-instruct",
+        "qwen3-8b",
+        "deepseek-r1-distill-llama-8b",
+        "llama-3.1-8b-instruct"
+      ],
+      "shared_script_policy": "all five models use the same Step 8 generator; model differences are confined to MODEL_CONFIGS chat template, token budget, thinking-output cleanup, retrieval index source, and BioMistral validated system prompt",
+      "start_model": "biomistral-7b",
+      "legacy_sources_to_keep_for_comparison": [
+        "src/step2_benchmarking/generate_biomistral.py",
+        "src/step2_benchmarking/generate_qwen.py",
+        "src/step2_benchmarking/generate_meditron.py"
+      ],
+      "smoke_confirmation_report": "refactor/pre_atom_pipeline/reports/ZEROSHOT_SMOKE_CONFIRMATION.md",
+      "selected_generation_temperature": 0.0,
+      "smoke_check_status": "existing Step 8 BioMistral zeroshot generated/evaluated files present for all 5 folds; not a direct reproduction of old Step2/Stage1 answers",
+      "final_stage8_temperature_policy": "Use temperature 0.0 for Stage 8 generation/evaluation reruns, except multirun and regen/self-correction experiments.",
+      "legacy_existing_generation_temperature": 0.1,
+      "temperature_exception_scope": [
+        "multirun",
+        "regen/self-correction"
+      ]
+    },
+    "llm_judge_biomistral": {
+      "selected_code_source": "src/step3_evaluation/stage1_gpt4_accuracy.py",
+      "candidate_code_sources": [
+        "src/step9_self_correction/v2/judge.py",
+        "src/ichl/judges/gpt4o_stage1_binary_judge.py",
+        "src/step8_multimodel_icl/evaluate_step8_binary.py",
+        "src/step3_evaluation/stage1_gpt4_accuracy.py"
+      ],
+      "candidate_artifacts": [
+        "output/step3_evaluation/stage1_gpt4/biomistral-7b_stage1_accuracy.csv",
+        "output/step8/biomistral-7b/fold_*/zeroshot_evaluated_binary.csv",
+        "output/step9_v2/judge_agreement_*.json"
+      ],
+      "decision_needed": "resolved: use old Stage 1 GPT-4o binary judge prompt/data construction with temperature 0.1 for open-ended answer judging",
+      "selected_prompt": "old_stage1_binary_gpt4o",
+      "selected_prompt_system": "You are a medical expert evaluating an AI model's answer to a clinical question.",
+      "selected_prompt_output": "single digit only: 1 = Correct, 0 = Incorrect",
+      "selected_prompt_user_fields": [
+        "DISCHARGE SUMMARY",
+        "QUESTION",
+        "CORRECT ANSWER (Ground Truth)",
+        "MODEL'S ANSWER"
+      ],
+      "selected_metric_or_label_definition": "binary_correct: 1 if GPT-4o returns 1 only; 0 if response contains 0; otherwise None/excluded or retried",
+      "calibration_baseline": "Sara/Jose A\u2229B N=112 human agreement subset, provisional for prompt confirmation",
+      "evidence": [
+        "refactor/pre_atom_pipeline/reports/GPT_JUDGE_OLD_PROMPT_PROVENANCE.md: exact old prompt/data T=0.1 matched old GPT record 97/100 on Caitlin overlap",
+        "datasets/external/all_users_openended_BioMistral-7B_GPT4o_evaluation.csv matches output/step3_evaluation/stage1_gpt4/biomistral-7b_stage1_accuracy.csv 962/962"
+      ],
+      "legacy_sources_to_keep_for_comparison": [
+        "src/step8_multimodel_icl/evaluate_step8.py reason-producing prompt",
+        "src/ichl/prompt_engineering/mlx_judge/run_vllm_judge_v2.py M2/M4 local charitable variants"
+      ],
+      "selected_temperature": 0.1,
+      "selected_max_tokens": 10,
+      "selected_ground_truth_format": "choice text only, no answer letter",
+      "selected_note_format": "[note i start] ... [note i end]",
+      "api_concurrency": "sequential GPT calls only",
+      "stage8_final_policy_note": "For Stage 8 reruns use deterministic T=0 where applicable; old Stage 1 GPT judge provenance remains T=0.1 for reproducing old GPT record."
+    },
+    "human_judge_biomistral": {
+      "selected_artifact": "datasets/external/all_users_openended_BioMistral-7B_1775740232208.csv",
+      "candidate_artifacts": [
+        "datasets/external/all_users_openended_BioMistral-7B_latest.csv",
+        "datasets/external/all_users_openended_BioMistral-7B_1775740232208.csv",
+        "datasets/human_judge_Stage2/*",
+        "output/final/tables/inter_rater_agreement*.tex"
+      ],
+      "decision_needed": "not final: use these files provisionally while confirming the LLM judge prompt; human source/final set may be revised later",
+      "selected_final_100_artifact": "output/step9_v2/sample100_gold_seed42.csv",
+      "selected_extended_200_artifact": "output/step9_v2/sample200_with_gold.csv",
+      "selected_output_schema": "raw rows keyed by User Name and Patient ID; derived gold files use patient_id plus reviewer binary columns, gpt, gold, n_raters",
+      "selected_metric_or_label_definition": "Answer Quality == 5 maps to correct=1; all other Answer Quality values map to incorrect=0",
+      "calibration_baseline": "Sara/Jose A\u2229B agreement subset from selected raw export, N=112, used to compare GPT judge prompt variants",
+      "final_human_set_policy": "provisional only; do not treat sample100 or sample200 as final conclusion until revised later",
+      "status": "provisional_evidence_only"
+    },
+    "ground_truth_selection": {
+      "selected_policy": null,
+      "candidate_policies": [
+        "A_intersection_B human agreement subset for judge validation",
+        "majority human label where >=2 raters exist",
+        "validated GPT-4o labels for full scale",
+        "hybrid hierarchy"
+      ],
+      "decision_needed": "not final: use Sara/Jose A\u2229B N=112 provisionally to compare GPT judge prompts; final ground truth policy will be revised later",
+      "human_baseline_artifact": "datasets/external/all_users_openended_BioMistral-7B_1775740232208.csv",
+      "human_baseline_policy": "Sara/Jose A\u2229B agreement subset, N=112, for GPT judge prompt selection",
+      "final_100_human_artifact": "output/step9_v2/sample100_gold_seed42.csv"
+    },
+    "icl_tests": {
+      "selected_code_source": null,
+      "candidate_code_sources": [
+        "src/step8_multimodel_icl/generate_step8.py",
+        "src/pilot_12_ra_icl/*",
+        "src/ichl/prompt_engineering/*",
+        "older BioMistral Step 4/6/8 pilots"
+      ],
+      "candidate_conditions": [
+        "zeroshot",
+        "gtr_note_pos_k1",
+        "gtr_note_neg_k1",
+        "gtr_note_posneg_k1",
+        "cot_evidence",
+        "cot_conclusion",
+        "multiturn",
+        "gtr_note_any_unlabeled_k1"
+      ],
+      "decision_needed": "final ICL condition set and which pilot conditions remain historical"
+    },
+    "multirun_self_correction": {
+      "status": "working_component_plan_not_final",
+      "candidate_code_sources": [
+        "src/step9_self_correction/v2/regen_pilot.py",
+        "src/step9_self_correction/v2/regen_v3_pilot.py",
+        "src/step9_self_correction/v2/raicl_test.py",
+        "src/step9_self_correction/v2/detection_format_bakeoff.py",
+        "src/step9_self_correction/v2/verdict.py",
+        "src/step9_self_correction/v2/verdict_v2.py"
+      ],
+      "candidate_artifacts": [
+        "output/step9_v2/detection_bakeoff_summary.md",
+        "output/step9_v2/STEP9_V2_RESULTS.md",
+        "output/step9_v2/STATE_AND_FINDINGS.md",
+        "output/step9_v2/retriever_bakeoff.md",
+        "output/step9_v2/multi_model/<model>/regen_fullscale.jsonl"
+      ],
+      "selected_detection_working_default": "F1 free-form detection plus GPT-4o validity gate",
+      "selected_correction_working_baseline": "regen plus count-compare verdict; correction variants still require validation",
+      "selected_verdict_working_default": "v1f free-form pairwise contradiction count, Qwen3-32B extraction, ties keep original",
+      "correction_variants_to_validate": [
+        "zero-shot regen baseline",
+        "span-guided correction with R2 multi-query retrieval",
+        "1-shot correction from audited high-confidence fix examples",
+        "span-guided plus 1-shot correction",
+        "best-of-3 correction candidates with verdict selection",
+        "V3 CoVe comparison only"
+      ],
+      "few_shot_policy": "do not reuse BioMistral contrast pool as-is; use only audited high-confidence fold-safe examples",
+      "pilot_recommendation": "100-150 balanced items on DeepSeek and Qwen2.5 first; optionally add Qwen3 or Llama",
+      "report": "refactor/pre_atom_pipeline/reports/MULTIRUN_COMPONENT_PLAN.md",
+      "temperature_policy": "Exception to Stage 8 T=0 rule: multirun and regen/self-correction keep their separately validated settings."
+    },
+    "retrieval_augment": {
+      "status": "evidence_review_not_final",
+      "report": "refactor/pre_atom_pipeline/reports/RETRIEVAL_AUGMENT_EVIDENCE.md",
+      "historical_best_stage8": "gtr_note_pos_k1: GTR-T5 note-similarity, k=1 positive QA example",
+      "newer_embedding_quality_best": "Alibaba-NLP/gte-large-en-v1.5 on full notes",
+      "newer_scorer_quality_best": "multi-component score using question + note + ground-truth/answer-alignment components",
+      "correction_retrieval_best": "Step9 R2 multi-query embedding + agreement scoring, top-5 note spans",
+      "caveat": "newer retrieval-quality gains have not yet translated into stable RA-ICL downstream accuracy gains",
+      "next_validation": [
+        "zeroshot T=0",
+        "gtr_note_pos_k1 T=0",
+        "gte multi-component Mode C/D T=0",
+        "optional gtr_note_neg_k1 T=0"
+      ]
+    }
+  }
+}

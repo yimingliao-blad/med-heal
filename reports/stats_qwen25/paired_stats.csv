@@ -1,0 +1,2 @@
+n,zeroshot_accuracy,final_accuracy,delta,fixes,breaks,mcnemar_p_one_sided,bootstrap_ci_low,bootstrap_ci_high
+40,0.8,0.825,0.02499999999999991,1,0,0.5,0.0,0.07500000000000007

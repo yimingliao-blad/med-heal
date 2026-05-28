@@ -1,0 +1,92 @@
+{
+  "n": 40,
+  "zeroshot_accuracy": 0.8,
+  "final_accuracy": 0.825,
+  "delta": 0.02499999999999991,
+  "fixes": 1,
+  "breaks": 0,
+  "same_correct": 32,
+  "same_wrong": 7,
+  "mcnemar": {
+    "n_discordant": 1,
+    "p_value_one_sided": 0.5,
+    "statistic_chi2_cc": 0.0
+  },
+  "bootstrap": {
+    "mean_delta": 0.025175,
+    "ci95": [
+      0.0,
+      0.07500000000000007
+    ],
+    "p_delta_gt_0": 0.6428
+  },
+  "per_fold": [
+    {
+      "fold": 0,
+      "n": 8,
+      "zeroshot_accuracy": 0.875,
+      "final_accuracy": 0.875,
+      "delta": 0.0,
+      "fixes": 0,
+      "breaks": 0
+    },
+    {
+      "fold": 1,
+      "n": 8,
+      "zeroshot_accuracy": 0.875,
+      "final_accuracy": 0.875,
+      "delta": 0.0,
+      "fixes": 0,
+      "breaks": 0
+    },
+    {
+      "fold": 2,
+      "n": 8,
+      "zeroshot_accuracy": 0.75,
+      "final_accuracy": 0.75,
+      "delta": 0.0,
+      "fixes": 0,
+      "breaks": 0
+    },
+    {
+      "fold": 3,
+      "n": 8,
+      "zeroshot_accuracy": 0.75,
+      "final_accuracy": 0.875,
+      "delta": 0.125,
+      "fixes": 1,
+      "breaks": 0
+    },
+    {
+      "fold": 4,
+      "n": 8,
+      "zeroshot_accuracy": 0.75,
+      "final_accuracy": 0.75,
+      "delta": 0.0,
+      "fixes": 0,
+      "breaks": 0
+    }
+  ],
+  "leave_one_fold_out": [
+    {
+      "held_out_fold": 0,
+      "delta": 0.03125
+    },
+    {
+      "held_out_fold": 1,
+      "delta": 0.03125
+    },
+    {
+      "held_out_fold": 2,
+      "delta": 0.03125
+    },
+    {
+      "held_out_fold": 3,
+      "delta": 0.0
+    },
+    {
+      "held_out_fold": 4,
+      "delta": 0.03125
+    }
+  ]
+}
