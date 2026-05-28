@@ -7,7 +7,7 @@ import os
 import random
 import re
 import time
-from collections import Counter, defaultdict
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -16,8 +16,9 @@ import pandas as pd
 import requests
 from openai import OpenAI
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-OUT_ROOT = PROJECT_ROOT / "refactor" / "pre_atom_pipeline" / "output" / "detection_bakeoff"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_REPO = Path(os.environ.get("MED_HEAL_SOURCE_REPO", PROJECT_ROOT.parent / "llm-ehr-hallucination"))
+OUT_ROOT = PROJECT_ROOT / "runs" / "detection_bakeoff"
 OUT_ROOT.mkdir(parents=True, exist_ok=True)
 
 SYSTEM = "You are a careful clinical QA auditor. You must check whether an answer is supported by the discharge note."
@@ -30,19 +31,24 @@ PROMPTS: dict[str, str] = {
     "p5_retrieval_payload": """Discharge note:\n{note}\n\nQuestion:\n{question}\n\nAnswer to audit:\n{answer}\n\nYour job is not only to decide whether the answer is wrong. Your job is to create a correction payload that a downstream retrieval step can use.\n\nCheck in this order:\n1. QUESTION_FOCUS: What exact visit/date/aspect/fact does the question ask for?\n2. ANSWER_FOCUS: What does the answer actually focus on?\n3. WRONG_OR_MISSING_TARGET: If wrong, identify the smallest wrong claim or missing required fact.\n4. EVIDENCE_NEEDED: What note evidence would prove the correction?\n\nOnly mark INCORRECT if the issue changes the answer to the question. Do not flag minor extra details.\n\nReturn exactly this template:\nVERDICT: CORRECT or INCORRECT\nERROR_TYPE: CONTRADICTION or OMISSION or QUESTION_MISALIGNMENT or NONE\nQUESTION_FOCUS: one sentence\nANSWER_FOCUS: one sentence\nWRONG_CLAIM: the smallest wrong claim, or NONE\nCORRECT_OR_MISSING_INFO: the fact that should replace/add/refocus the answer, or NONE\nEVIDENCE_NEEDED: what kind of note span should be retrieved\nRETRIEVAL_QUERY_1: short query using the question focus\nRETRIEVAL_QUERY_2: short query using the wrong/missing target\nRETRIEVAL_QUERY_3: short query using key clinical entities\nCORRECTION_HINT: one sentence telling the downstream corrector what to change\nWHY: one short explanation""",
     "p6_claims_to_queries": """Discharge note:\n{note}\n\nQuestion:\n{question}\n\nAnswer to audit:\n{answer}\n\nCreate a compact claim audit for downstream correction.\n\nA. Extract up to 5 clinically important claims from the answer.\nB. For each claim, mark supported / contradicted / not-in-note / wrong-focus.\nC. Check whether the answer omits a critical fact required by the question.\nD. If incorrect, produce retrieval queries that would find the exact correcting evidence.\n\nBe conservative: if the answer is clinically sufficient, mark CORRECT even if it is not exhaustive.\n\nReturn exactly this template:\nCLAIM_AUDIT:\n- claim: ... | status: supported/contradicted/not-in-note/wrong-focus | evidence target: ...\nVERDICT: CORRECT or INCORRECT\nERROR_TYPE: CONTRADICTION or OMISSION or QUESTION_MISALIGNMENT or NONE\nQUESTION_FOCUS: one sentence\nWRONG_CLAIM: the claim to repair, or NONE\nCORRECT_OR_MISSING_INFO: the target fact to retrieve, or NONE\nEVIDENCE_NEEDED: exact evidence needed for correction, or NONE\nRETRIEVAL_QUERY_1: short query\nRETRIEVAL_QUERY_2: short query\nRETRIEVAL_QUERY_3: short query\nCORRECTION_HINT: one sentence\nWHY: one short explanation""",
     "p7_error_gate_payload": """Discharge note:\n{note}\n\nQuestion:\n{question}\n\nAnswer to audit:\n{answer}\n\nYou are a high-precision gate before an automatic correction system. A false alarm may break a correct answer, so only mark INCORRECT when there is a correction-worthy error.\n\nCorrection-worthy errors are:\n- CONTRADICTION: the answer makes a claim that the note contradicts.\n- OMISSION: the answer misses a critical fact required to answer the question.\n- QUESTION_MISALIGNMENT: the answer addresses the wrong visit/date/aspect.\n\nIf incorrect, provide the exact payload needed for retrieval. If you cannot name the wrong claim or missing/refocus target, mark CORRECT.\n\nReturn exactly this template:\nVERDICT: CORRECT or INCORRECT\nERROR_TYPE: CONTRADICTION or OMISSION or QUESTION_MISALIGNMENT or NONE\nQUESTION_FOCUS: one sentence\nWRONG_CLAIM: exact wrong/missing/misaligned part of the answer, or NONE\nCORRECT_OR_MISSING_INFO: exact correction target grounded in the note, or NONE\nEVIDENCE_NEEDED: what evidence span should be retrieved, or NONE\nRETRIEVAL_QUERY_1: short query, or NONE\nRETRIEVAL_QUERY_2: short query, or NONE\nRETRIEVAL_QUERY_3: short query, or NONE\nCORRECTION_HINT: one sentence, or NONE\nWHY: one short explanation""",
+    "p8_natural_blind_error_hypothesis": """Discharge note:\n{note}\n\nQuestion:\n{question}\n\nZero-shot answer to audit:\n{answer}\n\nRead naturally. First make a blind hypothesis about what could be wrong in the answer before deciding whether it is actually wrong. Consider omission, fabrication, reasoning error, context confusion, temporal error, and wrong question focus.\n\nDo not force an error. If the answer is clinically sufficient for the question, keep it.\n\nReturn exactly this template:\nVERDICT: CORRECT or INCORRECT\nERROR_TYPE: CONTRADICTION or OMISSION or QUESTION_MISALIGNMENT or FABRICATION or REASONING_ERROR or TEMPORAL_ERROR or NONE\nQUESTION_FOCUS: one sentence\nANSWER_FOCUS: one sentence\nPOSSIBLE_ERROR_HYPOTHESIS: one sentence, or NONE\nWRONG_CLAIM: exact wrong/missing/misaligned part, or NONE\nCORRECT_OR_MISSING_INFO: exact correction target grounded in the note, or NONE\nEVIDENCE_NEEDED: what evidence span should be retrieved, or NONE\nRETRIEVAL_QUERY_1: short query, or NONE\nRETRIEVAL_QUERY_2: short query, or NONE\nRETRIEVAL_QUERY_3: short query, or NONE\nCORRECTION_HINT: one sentence, or NONE\nWHY: one short explanation""",
+    "p9_claims_first_natural": """Discharge note:\n{note}\n\nQuestion:\n{question}\n\nZero-shot answer to audit:\n{answer}\n\nAudit the answer as claims, but write naturally. Identify the answer's main clinical claims and ask whether each one is supported, contradicted, unsupported, or outside the question focus. Then decide whether the answer should go to correction.\n\nOnly send to correction when a claim is contradicted, a required answer fact is missing, or the answer focuses on the wrong visit/date/aspect.\n\nReturn exactly this template:\nCLAIM_AUDIT:\n- claim: ... | status: supported/contradicted/unsupported/wrong-focus | needed evidence: ...\nVERDICT: CORRECT or INCORRECT\nERROR_TYPE: CONTRADICTION or OMISSION or QUESTION_MISALIGNMENT or FABRICATION or NONE\nQUESTION_FOCUS: one sentence\nWRONG_CLAIM: exact wrong claim, or NONE\nCORRECT_OR_MISSING_INFO: exact correction target grounded in the note, or NONE\nEVIDENCE_NEEDED: what evidence span should be retrieved, or NONE\nRETRIEVAL_QUERY_1: short query, or NONE\nRETRIEVAL_QUERY_2: short query, or NONE\nRETRIEVAL_QUERY_3: short query, or NONE\nCORRECTION_HINT: one sentence, or NONE\nWHY: one short explanation""",
+    "p10_omission_slot_check": """Discharge note:\n{note}\n\nQuestion:\n{question}\n\nZero-shot answer to audit:\n{answer}\n\nFocus on omission. Identify what type of answer the question requires, then check whether the answer supplies that required slot. Do not penalize missing background facts unless the missing fact changes the answer.\n\nReturn exactly this template:\nREQUIRED_ANSWER_SLOT: the exact fact/type of fact requested\nANSWERED_SLOT: the fact/type of fact actually provided by the answer\nVERDICT: CORRECT or INCORRECT\nERROR_TYPE: OMISSION or QUESTION_MISALIGNMENT or CONTRADICTION or NONE\nQUESTION_FOCUS: one sentence\nWRONG_CLAIM: exact wrong/missing/misaligned part, or NONE\nCORRECT_OR_MISSING_INFO: required missing fact grounded in the note, or NONE\nEVIDENCE_NEEDED: evidence needed to fill the answer slot, or NONE\nRETRIEVAL_QUERY_1: short query, or NONE\nRETRIEVAL_QUERY_2: short query, or NONE\nRETRIEVAL_QUERY_3: short query, or NONE\nCORRECTION_HINT: one sentence, or NONE\nWHY: one short explanation""",
+    "p11_kg_assisted_contradiction_omission": """Discharge note:\n{note}\n\nQuestion:\n{question}\n\nZero-shot answer to audit:\n{answer}\n\nStructured context extracted from the same note/question:\n{kg_context}\n\nUse the structured context only as an index of facts to inspect; the discharge note remains the source of truth. Decide whether the answer contradicts a listed fact, ignores a required listed fact, or answers the wrong focus.\n\nReturn exactly this template:\nKG_FACTS_USED: brief list, or NONE\nVERDICT: CORRECT or INCORRECT\nERROR_TYPE: CONTRADICTION or OMISSION or QUESTION_MISALIGNMENT or NONE\nQUESTION_FOCUS: one sentence\nWRONG_CLAIM: exact wrong/missing/misaligned part, or NONE\nCORRECT_OR_MISSING_INFO: exact correction target grounded in the note, or NONE\nEVIDENCE_NEEDED: what evidence span should be retrieved, or NONE\nRETRIEVAL_QUERY_1: short query, or NONE\nRETRIEVAL_QUERY_2: short query, or NONE\nRETRIEVAL_QUERY_3: short query, or NONE\nCORRECTION_HINT: one sentence, or NONE\nWHY: one short explanation""",
+    "p12_kg_plus_direct_evidence": """Discharge note:\n{note}\n\nQuestion:\n{question}\n\nZero-shot answer to audit:\n{answer}\n\nStructured context and candidate evidence:\n{kg_context}\n\nUse a two-pass check. First compare the answer to the structured facts. Then verify against the direct note evidence. Mark INCORRECT only when the evidence gives a correction-worthy contradiction, omission, or focus error.\n\nReturn exactly this template:\nSTRUCTURED_SIGNAL: contradiction/omission/focus-error/no-error/unclear\nDIRECT_EVIDENCE_CHECK: one sentence\nVERDICT: CORRECT or INCORRECT\nERROR_TYPE: CONTRADICTION or OMISSION or QUESTION_MISALIGNMENT or NONE\nQUESTION_FOCUS: one sentence\nWRONG_CLAIM: exact wrong/missing/misaligned part, or NONE\nCORRECT_OR_MISSING_INFO: exact correction target grounded in the note, or NONE\nEVIDENCE_NEEDED: what evidence span should be retrieved, or NONE\nRETRIEVAL_QUERY_1: short query, or NONE\nRETRIEVAL_QUERY_2: short query, or NONE\nRETRIEVAL_QUERY_3: short query, or NONE\nCORRECTION_HINT: one sentence, or NONE\nWHY: one short explanation""",
 }
 
 PARSE_SYSTEM = "You extract structured fields from a clinical self-audit. Return JSON only."
-PARSE_USER = """Extract the auditor's decision from this text. Use only what the text says; do not re-judge the clinical case.\n\nTEXT:\n{raw}\n\nReturn JSON with exactly these keys:\n{{"verdict":"CORRECT|INCORRECT|UNCLEAR", "error_type":"CONTRADICTION|OMISSION|QUESTION_MISALIGNMENT|NONE|UNCLEAR", "wrong_claim":"string", "correct_or_missing_info":"string", "question_focus":"string", "evidence_needed":"string", "retrieval_queries":["string"], "correction_hint":"string", "why":"string"}}"""
+PARSE_USER = """Extract the auditor's decision from this text. Use only what the text says; do not re-judge the clinical case.\n\nTEXT:\n{raw}\n\nReturn JSON with exactly these keys:\n{{"verdict":"CORRECT|INCORRECT|UNCLEAR", "error_type":"CONTRADICTION|OMISSION|QUESTION_MISALIGNMENT|FABRICATION|REASONING_ERROR|TEMPORAL_ERROR|NONE|UNCLEAR", "wrong_claim":"string", "correct_or_missing_info":"string", "question_focus":"string", "evidence_needed":"string", "retrieval_queries":["string"], "correction_hint":"string", "why":"string"}}"""
 
 
 def load_api_key() -> str:
-    env = PROJECT_ROOT / ".env"
-    if env.exists():
-        for line in env.read_text().splitlines():
-            line = line.strip()
-            if line.startswith("OPENAI_API_KEY=") and not line.startswith("#"):
-                return line.split("=", 1)[1].strip()
+    for env in (PROJECT_ROOT / ".env", SOURCE_REPO / ".env"):
+        if env.exists():
+            for line in env.read_text().splitlines():
+                line = line.strip()
+                if line.startswith("OPENAI_API_KEY=") and not line.startswith("#"):
+                    return line.split("=", 1)[1].strip()
     if os.environ.get("OPENAI_API_KEY"):
         return os.environ["OPENAI_API_KEY"]
     raise RuntimeError("OPENAI_API_KEY not found")
@@ -84,7 +90,7 @@ def vllm_chat(system: str, user: str, port: int, max_tokens: int, temperature: f
 
 
 def load_notes_lookup() -> dict[str, str]:
-    df = pd.read_json(PROJECT_ROOT / "output" / "EHRNoteQA_processed.jsonl", lines=True)
+    df = pd.read_json(SOURCE_REPO / "output" / "EHRNoteQA_processed.jsonl", lines=True)
     out = {}
     for _, r in df.iterrows():
         parts = []
@@ -100,7 +106,7 @@ def load_rows(n_wrong: int, n_correct: int, seed: int) -> list[dict[str, Any]]:
     notes = load_notes_lookup()
     rows = []
     for fold in range(5):
-        p = PROJECT_ROOT / "output" / "step8" / "qwen2.5-7b-instruct" / f"fold_{fold}" / "zeroshot_evaluated_binary.csv"
+        p = SOURCE_REPO / "output" / "step8" / "qwen2.5-7b-instruct" / f"fold_{fold}" / "zeroshot_evaluated_binary.csv"
         df = pd.read_csv(p)
         for _, r in df.iterrows():
             rows.append({
@@ -126,13 +132,71 @@ def load_rows(n_wrong: int, n_correct: int, seed: int) -> list[dict[str, Any]]:
     return sample
 
 
-def generate_one(row: dict[str, Any], prompt_id: str, port: int, temperature: float) -> dict[str, Any]:
-    user = PROMPTS[prompt_id].format(note=row["note"][:18000], question=row["question"], answer=row["answer"][:2000])
+
+def sentence_spans(text: str) -> list[str]:
+    chunks = re.split(r"(?<=[.!?])\s+|\n+", text)
+    return [re.sub(r"\s+", " ", c).strip() for c in chunks if len(c.strip()) > 30]
+
+
+def lexical_top_spans(note: str, query: str, topk: int = 8) -> list[str]:
+    spans = sentence_spans(note)
+    q_terms = {t for t in re.findall(r"[a-z0-9]+", query.lower()) if len(t) > 2}
+    scored = []
+    for span in spans:
+        terms = set(re.findall(r"[a-z0-9]+", span.lower()))
+        score = len(q_terms & terms)
+        if score:
+            scored.append((score, len(span), span))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [x[2] for x in scored[:topk]]
+
+
+def render_evidence_context(row: dict[str, Any], topk: int) -> str:
+    query = " ".join([row.get("question", ""), row.get("answer", "")])
+    spans = lexical_top_spans(row.get("note", ""), query, topk=topk)
+    if not spans:
+        return "No structured context was produced."
+    lines = ["Candidate note evidence spans:"]
+    for i, span in enumerate(spans, 1):
+        lines.append(f"{i}. {span[:700]}")
+    return "\n".join(lines)
+
+
+def render_v7_kg_context(row: dict[str, Any], topk: int) -> str:
+    evidence = render_evidence_context(row, topk=topk)
+    try:
+        import sys
+        src_path = str(SOURCE_REPO / "src")
+        if src_path not in sys.path:
+            sys.path.insert(0, src_path)
+        from self_atom_v7.kg_build import build_kg, render
+        kg_input = "Question: " + row.get("question", "") + "\n\n" + evidence
+        kg = build_kg(kg_input)
+        rendered = render(kg)
+        return "Knowledge graph from question and candidate note spans:\n" + rendered[:4500] + "\n\n" + evidence
+    except Exception as e:
+        return evidence + f"\n\nKG extraction failed; use candidate evidence only. Error: {type(e).__name__}: {str(e)[:200]}"
+
+
+def kg_context_for(row: dict[str, Any], kg_source: str, topk: int) -> str:
+    if kg_source == "none":
+        return "No structured context provided."
+    if kg_source == "evidence":
+        return render_evidence_context(row, topk=topk)
+    if kg_source == "v7_kg":
+        return render_v7_kg_context(row, topk=topk)
+    raise ValueError(f"Unknown kg source: {kg_source}")
+
+def generate_one(row: dict[str, Any], prompt_id: str, port: int, temperature: float, kg_source: str, kg_topk: int) -> dict[str, Any]:
+    kg_context = kg_context_for(row, kg_source=kg_source, topk=kg_topk) if "{kg_context}" in PROMPTS[prompt_id] else "No structured context provided."
+    user = PROMPTS[prompt_id].format(note=row["note"][:18000], question=row["question"], answer=row["answer"][:2000], kg_context=kg_context[:5000])
     out = {k: row[k] for k in ["fold", "idx", "patient_id", "question", "answer", "ground_truth", "label"]}
     out["prompt_id"] = prompt_id
     out["temperature"] = temperature
     try:
-        out["raw"] = vllm_chat(SYSTEM, user, port=port, max_tokens=900, temperature=temperature)
+        out["kg_source"] = kg_source
+        out["kg_context"] = kg_context
+        out["raw"] = vllm_chat(SYSTEM, user, port=port, max_tokens=1200, temperature=temperature)
         out["error"] = None
     except Exception as e:
         out["raw"] = ""
@@ -155,7 +219,7 @@ def parse_regex(raw: str) -> dict[str, Any]:
         verdict = "INCORRECT" if re.search(r"\b(incorrect|not correct|wrong|unsupported|contradict)", low) else ("CORRECT" if re.search(r"\b(correct|supported)\b", low) else "UNCLEAR")
     et_s = field("ERROR_TYPE").upper()
     error_type = "UNCLEAR"
-    for t in ["QUESTION_MISALIGNMENT", "CONTRADICTION", "OMISSION", "NONE"]:
+    for t in ["QUESTION_MISALIGNMENT", "CONTRADICTION", "OMISSION", "FABRICATION", "REASONING_ERROR", "TEMPORAL_ERROR", "NONE"]:
         if t in et_s:
             error_type = t
             break
@@ -262,6 +326,8 @@ def main() -> int:
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--prompts", nargs="+", default=list(PROMPTS))
     ap.add_argument("--skip-gpt-parse", action="store_true")
+    ap.add_argument("--kg-source", choices=["none", "evidence", "v7_kg"], default="none", help="Optional context for KG-assisted prompt variants p11/p12.")
+    ap.add_argument("--kg-topk", type=int, default=8, help="Number of lexical evidence spans to include when kg-source is evidence or v7_kg.")
     args = ap.parse_args()
 
     served = served_model_id(args.port)
@@ -275,10 +341,10 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"served_model={served}")
-    print(f"sample={len(sample)} prompts={args.prompts} concurrency={args.concurrency} temperature={args.temperature}", flush=True)
+    print(f"sample={len(sample)} prompts={args.prompts} concurrency={args.concurrency} temperature={args.temperature} kg_source={args.kg_source}", flush=True)
     rows = []
     with ThreadPoolExecutor(max_workers=args.concurrency) as ex:
-        futs = [ex.submit(generate_one, row, pid, args.port, args.temperature) for row in sample for pid in args.prompts]
+        futs = [ex.submit(generate_one, row, pid, args.port, args.temperature, args.kg_source, args.kg_topk) for row in sample for pid in args.prompts]
         for i, fut in enumerate(as_completed(futs), 1):
             rows.append(fut.result())
             if i % 20 == 0 or i == len(futs):
