@@ -11,12 +11,13 @@ import pandas as pd
 import requests
 from openai import OpenAI
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-OUT_ROOT = PROJECT_ROOT / "refactor" / "pre_atom_pipeline" / "output" / "selfdetect_raicl_verdict"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_REPO = Path(os.environ.get('MED_HEAL_SOURCE_REPO', PROJECT_ROOT.parent / 'llm-ehr-hallucination'))
+OUT_ROOT = PROJECT_ROOT / 'runs' / 'selfdetect_raicl_verdict'
 OUT_ROOT.mkdir(parents=True, exist_ok=True)
 
 import sys
-sys.path.insert(0, str(PROJECT_ROOT / "src" / "step9_self_correction" / "v2"))
+sys.path.insert(0, str(SOURCE_REPO / 'src' / 'step9_self_correction' / 'v2'))
 from note_span_index import topk_spans  # noqa: E402
 
 DET_SYSTEM = "You are a careful clinical QA auditor. You must check whether an answer is supported by the discharge note."
@@ -53,6 +54,66 @@ RETRIEVAL_QUERY_3: short query using key clinical entities
 CORRECTION_HINT: one sentence telling the downstream corrector what to change
 WHY: one short explanation"""
 
+DET_CONTRADICTION_FIRST = """Discharge note:
+{note}
+
+Question:
+{question}
+
+Answer to audit:
+{answer}
+
+Focus first on contradiction, because contradiction is the most reliable error signal. Ask whether the answer makes a clinically important claim that the discharge note directly contradicts. If there is no direct contradiction, then check for wrong question focus. Only use omission when the answer misses the central required answer slot.
+
+Do not mark incorrect for harmless extra wording or missing background detail. If you cannot name the contradicted claim or exact wrong focus, mark CORRECT.
+
+Return exactly this template:
+VERDICT: CORRECT or INCORRECT
+ERROR_TYPE: CONTRADICTION or QUESTION_MISALIGNMENT or OMISSION or NONE
+QUESTION_FOCUS: one sentence
+ANSWER_FOCUS: one sentence
+WRONG_CLAIM: exact contradicted/misaligned/missing claim, or NONE
+CORRECT_OR_MISSING_INFO: exact note-supported replacement or required missing fact, or NONE
+EVIDENCE_NEEDED: note span needed to verify the contradiction or focus
+RETRIEVAL_QUERY_1: short query using the wrong claim
+RETRIEVAL_QUERY_2: short query using the note-supported replacement
+RETRIEVAL_QUERY_3: short query using the question focus
+CORRECTION_HINT: one sentence telling the corrector what to change
+WHY: one short explanation"""
+
+DET_CLAIM_CONTRADICTION = """Discharge note:
+{note}
+
+Question:
+{question}
+
+Answer to audit:
+{answer}
+
+Extract the answer's main claims. For each claim, decide whether the note supports it, contradicts it, or does not address it. The correction pipeline should run only if at least one central claim is contradicted, the answer targets the wrong visit/date/aspect, or the required answer slot is absent.
+
+Return exactly this template:
+CLAIM_CHECK:
+- claim: ... | status: supported/contradicted/not-addressed/wrong-focus | evidence target: ...
+VERDICT: CORRECT or INCORRECT
+ERROR_TYPE: CONTRADICTION or QUESTION_MISALIGNMENT or OMISSION or NONE
+QUESTION_FOCUS: one sentence
+ANSWER_FOCUS: one sentence
+WRONG_CLAIM: exact claim to repair, or NONE
+CORRECT_OR_MISSING_INFO: exact note-supported replacement or required missing fact, or NONE
+EVIDENCE_NEEDED: exact evidence span needed
+RETRIEVAL_QUERY_1: short query
+RETRIEVAL_QUERY_2: short query
+RETRIEVAL_QUERY_3: short query
+CORRECTION_HINT: one sentence
+WHY: one short explanation"""
+
+DET_PROMPTS = {
+    'p5_retrieval_payload': DET_P5,
+    'contradiction_first': DET_CONTRADICTION_FIRST,
+    'claim_contradiction': DET_CLAIM_CONTRADICTION,
+}
+
 PARSE_SYSTEM = "Extract structured fields from a clinical self-audit. Return JSON only."
 PARSE_DET_USER = """Extract the detection payload from this text. Use only what the text says; do not re-judge the clinical case.
 
@@ -62,8 +123,10 @@ TEXT:
 Return JSON:
 {{"verdict":"CORRECT|INCORRECT|UNCLEAR", "error_type":"CONTRADICTION|OMISSION|QUESTION_MISALIGNMENT|NONE|UNCLEAR", "question_focus":"string", "answer_focus":"string", "wrong_claim":"string", "correct_or_missing_info":"string", "evidence_needed":"string", "retrieval_queries":["string"], "correction_hint":"string", "why":"string"}}"""
 
-COR_SYSTEM = "You are a careful clinical QA assistant. Revise only when same-patient evidence supports the revision."
-COR_USER = """Discharge note:
+COR_SYSTEM = "You are a careful clinical QA assistant. Revise when same-patient evidence and detection feedback support the revision."
+
+COR_PROMPTS: dict[str, str] = {
+    'balanced': """Discharge note:
 {note}
 
 Question:
@@ -85,10 +148,90 @@ Same-patient retrieved evidence. This is the factual source:
 Retrieved correction example from another patient. Use as style/pattern only, not factual content:
 {example_block}
 
-Write the best final answer to the question in 1-3 sentences. Use only facts supported by the discharge note and evidence spans."""
+Write the best final answer to the question in 1-3 sentences. Use only facts supported by the discharge note and evidence spans.""",
+    'accept_suggestion_if_supported': """Discharge note:
+{note}
 
-VERDICT_SYSTEM = "You are a medical expert comparing two answers to the same clinical question."
-VERDICT_USER = """Discharge summary:
+Question:
+{question}
+
+Previous answer:
+{answer}
+
+The detection step found a likely problem:
+- error type: {error_type}
+- wrong or missing part: {wrong_claim}
+- suggested correction target: {correct_or_missing_info}
+- correction hint: {correction_hint}
+
+Same-patient evidence:
+{spans_block}
+
+Correction example from another patient, for pattern only:
+{example_block}
+
+If the same-patient evidence supports the suggested correction target, apply it. Do not preserve the previous answer just because it is fluent. Keep only previous-answer content that is supported and still answers the question. Return only the corrected final answer.""",
+    'direct_rewrite_from_feedback': """Discharge note:
+{note}
+
+Question:
+{question}
+
+Previous answer:
+{answer}
+
+Detected issue:
+- type: {error_type}
+- question focus: {question_focus}
+- problematic claim: {wrong_claim}
+- target fact: {correct_or_missing_info}
+- hint: {correction_hint}
+
+Evidence spans:
+{spans_block}
+
+Rewrite the answer around the target fact and the question focus. Prefer a clear corrected answer over a minimal edit when the previous answer is misleading. Do not include unsupported facts. Return only the final answer.""",
+    'contradiction_repair': """Discharge note:
+{note}
+
+Question:
+{question}
+
+Previous answer:
+{answer}
+
+Detection feedback says the main risk is a contradicted or unsupported claim:
+- wrong claim: {wrong_claim}
+- note-supported replacement: {correct_or_missing_info}
+- hint: {correction_hint}
+
+Evidence spans:
+{spans_block}
+
+Replace the contradicted claim with the note-supported fact. Remove any part of the previous answer that conflicts with the evidence. Keep supported parts. Return only the final answer.""",
+    'omission_repair': """Discharge note:
+{note}
+
+Question:
+{question}
+
+Previous answer:
+{answer}
+
+Detection feedback says the answer may be missing the required answer slot:
+- question focus: {question_focus}
+- missing target: {correct_or_missing_info}
+- hint: {correction_hint}
+
+Evidence spans:
+{spans_block}
+
+Add the required missing answer fact if it is present in the evidence. Keep the answer focused on the question. Return only the final answer.""",
+}
+
+VERDICT_SYSTEM = "You are a strict medical expert comparing two answers against the discharge note and question."
+VERDICT_PROMPTS: dict[str, str] = {
+    'balanced': """Discharge summary:
 {note}
 
 Question:
@@ -105,7 +248,58 @@ Consider: consistency with notes, completeness for all parts of the question, an
 If the corrected answer introduces unsupported facts or drops necessary information, prefer the original.
 
 Reply on the FIRST line with exactly one letter: A or B
-On the SECOND line, give one short reason."""
+On the SECOND line, give one short reason.""",
+    'false_correction_sensitive': """Discharge summary:
+{note}
+
+Question:
+{question}
+
+ANSWER A:
+{answer_a}
+
+ANSWER B:
+{answer_b}
+
+Compare both answers against the discharge summary and the exact question. A correction should be accepted only if it is clearly more faithful to the note and better answers the question. Reject a correction if it adds unsupported facts, changes a supported answer unnecessarily, drops a required detail, or answers a different focus.
+
+Choose the safer answer for final reporting.
+
+Reply on the FIRST line with exactly one letter: A or B
+On the SECOND line, give one short reason.""",
+    'derive_then_compare': """Discharge summary:
+{note}
+
+Question:
+{question}
+
+ANSWER A:
+{answer_a}
+
+ANSWER B:
+{answer_b}
+
+First determine, privately, the answer that is supported by the discharge summary for this question. Then choose whether Answer A or Answer B is closer to that note-supported answer. Penalize unsupported additions and wrong-focus answers. Prefer the original if both are equivalent or the correction is not clearly better.
+
+Reply on the FIRST line with exactly one letter: A or B
+On the SECOND line, give one short reason.""",
+    'contradiction_count': """Discharge summary:
+{note}
+
+Question:
+{question}
+
+ANSWER A:
+{answer_a}
+
+ANSWER B:
+{answer_b}
+
+Count material contradictions with the discharge summary in each answer. Also check whether each answer directly answers the question. Pick the answer with fewer material contradictions. If contradiction counts tie, pick the answer that better covers the requested answer slot. If still tied, prefer the original answer.
+
+Reply on the FIRST line with exactly one letter: A or B
+On the SECOND line, give one short reason.""",
+}
 PARSE_VERDICT_USER = """The text below was supposed to pick answer A or B. Extract the pick. If unclear, return UNCLEAR.
 
 TEXT:
@@ -120,12 +314,12 @@ def judge_user(note: str, question: str, ground_truth: str, answer: str) -> str:
 
 
 def load_api_key() -> str:
-    env=PROJECT_ROOT/'.env'
-    if env.exists():
-        for line in env.read_text().splitlines():
-            line=line.strip()
-            if line.startswith('OPENAI_API_KEY=') and not line.startswith('#'):
-                return line.split('=',1)[1].strip()
+    for env in (PROJECT_ROOT/'.env', SOURCE_REPO/'.env'):
+        if env.exists():
+            for line in env.read_text().splitlines():
+                line=line.strip()
+                if line.startswith('OPENAI_API_KEY=') and not line.startswith('#'):
+                    return line.split('=',1)[1].strip()
     if os.environ.get('OPENAI_API_KEY'):
         return os.environ['OPENAI_API_KEY']
     raise RuntimeError('OPENAI_API_KEY not found')
@@ -231,7 +425,7 @@ def parse_verdict(raw:str)->dict[str,Any]:
 
 
 def load_notes()->dict[str,str]:
-    df=pd.read_json(PROJECT_ROOT/'output'/'EHRNoteQA_processed.jsonl',lines=True); out={}
+    df=pd.read_json(SOURCE_REPO/'output'/'EHRNoteQA_processed.jsonl',lines=True); out={}
     for _,r in df.iterrows():
         parts=[]
         for i in (1,2,3):
@@ -244,7 +438,7 @@ def load_notes()->dict[str,str]:
 def load_rows(n_wrong:int,n_correct:int,seed:int)->list[dict[str,Any]]:
     notes=load_notes(); rows=[]
     for fold in range(5):
-        df=pd.read_csv(PROJECT_ROOT/'output'/'step8'/'qwen2.5-7b-instruct'/f'fold_{fold}'/'zeroshot_evaluated_binary.csv')
+        df=pd.read_csv(SOURCE_REPO/'output'/'step8'/'qwen2.5-7b-instruct'/f'fold_{fold}'/'zeroshot_evaluated_binary.csv')
         for _,r in df.iterrows():
             pid=int(r['patient_id']); rows.append({'fold':fold,'idx':int(r['idx']),'patient_id':pid,'question':str(r['question']),'ground_truth':str(r['ground_truth']),'answer':str(r['model_answer']),'orig_label':int(r['binary_correct']),'note':notes[str(pid)]})
     wrong=[r for r in rows if r['orig_label']==0]; correct=[r for r in rows if r['orig_label']==1]
@@ -256,7 +450,7 @@ def load_rows(n_wrong:int,n_correct:int,seed:int)->list[dict[str,Any]]:
 _pool_cache={}
 def load_pool(fold:int)->list[dict[str,Any]]:
     if fold not in _pool_cache:
-        p=PROJECT_ROOT/'workspace'/'self_critique'/'data'/'bm_contrast_pool'/f'fold_{fold}_pool.json'
+        p=SOURCE_REPO/'workspace'/'self_critique'/'data'/'bm_contrast_pool'/f'fold_{fold}_pool.json'
         _pool_cache[fold]=json.loads(p.read_text()) if p.exists() else []
     return _pool_cache[fold]
 
@@ -284,39 +478,41 @@ def render_example(ex:dict[str,Any]|None)->str:
     return f"Question: {ex.get('question','')}\nWrong answer: {ex.get('wrong_answer','')}\nWhat was wrong: {ex.get('what_was_wrong','')}\nCorrect answer pattern: {ex.get('ground_truth','')}\nEvidence style: {ev}"
 
 
-def run_detect(row,port,temp)->dict[str,Any]:
-    raw=vllm_chat(DET_SYSTEM,DET_P5.format(note=row['note'][:18000],question=row['question'],answer=row['answer'][:2000]),port,900,temp)
+def run_detect(row,port,temp,prompt_id)->dict[str,Any]:
+    template=DET_PROMPTS[prompt_id]
+    raw=vllm_chat(DET_SYSTEM,template.format(note=row['note'][:18000],question=row['question'],answer=row['answer'][:2000]),port,1000,temp)
     parsed=parse_detection(raw); parsed['valid']=valid_detection(parsed)
-    return {'raw':raw,'parsed':parsed,'prompt':'p5_retrieval_payload','temperature':temp}
+    return {'raw':raw,'parsed':parsed,'prompt':prompt_id,'temperature':temp}
 
-def run_correction(row,det,spans,example,port,temp)->dict[str,Any]:
-    user=COR_USER.format(note=row['note'][:18000],question=row['question'],answer=row['answer'][:1800],error_type=det.get('error_type',''),question_focus=det.get('question_focus',''),wrong_claim=det.get('wrong_claim',''),correct_or_missing_info=det.get('correct_or_missing_info',''),correction_hint=det.get('correction_hint',''),spans_block=render_spans(spans),example_block=render_example(example))
-    ans=vllm_chat(COR_SYSTEM,user,port,600,temp)
-    return {'answer':ans,'temperature':temp,'raicl_example':example,'spans':spans}
+def run_correction(row,det,spans,example,port,temp,prompt_id)->dict[str,Any]:
+    template=COR_PROMPTS[prompt_id]
+    user=template.format(note=row['note'][:18000],question=row['question'],answer=row['answer'][:1800],error_type=det.get('error_type',''),question_focus=det.get('question_focus',''),wrong_claim=det.get('wrong_claim',''),correct_or_missing_info=det.get('correct_or_missing_info',''),correction_hint=det.get('correction_hint',''),spans_block=render_spans(spans),example_block=render_example(example))
+    ans=vllm_chat(COR_SYSTEM,user,port,700,temp)
+    return {'answer':ans,'temperature':temp,'prompt':prompt_id,'raicl_example':example,'spans':spans}
 
-def run_verdict(row,corr_answer,port,k,temp)->dict[str,Any]:
+def run_verdict(row,corr_answer,port,k,temp,prompt_id)->dict[str,Any]:
     rng=random.Random(42+(row['fold']<<16)+row['idx']); orig_a=rng.random()>0.5
     ans_a=row['answer'] if orig_a else corr_answer; ans_b=corr_answer if orig_a else row['answer']
     samples=[]
     for _ in range(k):
-        raw=vllm_chat(VERDICT_SYSTEM,VERDICT_USER.format(note=row['note'][:18000],question=row['question'],answer_a=ans_a[:1500],answer_b=ans_b[:1500]),port,220,temp)
+        raw=vllm_chat(VERDICT_SYSTEM,VERDICT_PROMPTS[prompt_id].format(note=row['note'][:18000],question=row['question'],answer_a=ans_a[:1500],answer_b=ans_b[:1500]),port,260,temp)
         parsed=parse_verdict(raw); samples.append({'raw':raw,**parsed})
     counts=Counter(s['pick'] for s in samples); corrected_slot='B' if orig_a else 'A'; corrected_votes=counts.get(corrected_slot,0)
     a,b=counts.get('A',0),counts.get('B',0)
     majority='TIE' if a==b else ('A' if a>b else 'B')
     accept=(majority==corrected_slot and corrected_votes>k/2)
-    return {'variant':'pairwise_gate','k':k,'temperature':temp,'orig_in_slot_A':orig_a,'corrected_slot':corrected_slot,'votes':dict(counts),'majority_pick':majority,'accept_correction':accept,'samples':samples}
+    return {'variant':prompt_id,'k':k,'temperature':temp,'orig_in_slot_A':orig_a,'corrected_slot':corrected_slot,'votes':dict(counts),'majority_pick':majority,'accept_correction':accept,'samples':samples}
 
 def process_one(row,port,args)->dict[str,Any]:
     out={k:row[k] for k in ['fold','idx','patient_id','question','ground_truth','answer','orig_label']}
     try:
-        det=run_detect(row,port,args.det_temperature); out['detection']=det
+        det=run_detect(row,port,args.det_temperature,args.det_prompt); out['detection']=det
         p=det['parsed']
         if p.get('verdict')!='INCORRECT' or not p.get('valid'):
             out['action']='kept_original_no_detection'; out['final_answer']=row['answer']; return out
         spans=retrieve_spans(row,p,args.k_spans); ex=retrieve_example(row,p)
-        corr=run_correction(row,p,spans,ex,port,args.correction_temperature); out['correction']=corr
-        verdict=run_verdict(row,corr['answer'],port,args.verdict_k,args.verdict_temperature); out['verdict']=verdict
+        corr=run_correction(row,p,spans,ex,port,args.correction_temperature,args.correction_prompt); out['correction']=corr
+        verdict=run_verdict(row,corr['answer'],port,args.verdict_k,args.verdict_temperature,args.verdict_prompt); out['verdict']=verdict
         if verdict['accept_correction']:
             out['action']='accepted_correction'; out['final_answer']=corr['answer']
         else:
@@ -342,10 +538,13 @@ def main()->int:
     ap.add_argument('--n-wrong',type=int,default=2); ap.add_argument('--n-correct',type=int,default=2); ap.add_argument('--seed',type=int,default=42)
     ap.add_argument('--det-temperature',type=float,default=0.7); ap.add_argument('--correction-temperature',type=float,default=0.0); ap.add_argument('--verdict-temperature',type=float,default=0.7)
     ap.add_argument('--verdict-k',type=int,default=3); ap.add_argument('--k-spans',type=int,default=5); ap.add_argument('--judge',action='store_true')
+    ap.add_argument('--det-prompt',choices=sorted(DET_PROMPTS),default='contradiction_first')
+    ap.add_argument('--correction-prompt',choices=sorted(COR_PROMPTS),default='accept_suggestion_if_supported')
+    ap.add_argument('--verdict-prompt',choices=sorted(VERDICT_PROMPTS),default='false_correction_sensitive')
     args=ap.parse_args(); served=served_model_id(args.port)
     if 'qwen2.5' not in served.lower() and 'qwen2' not in served.lower(): raise RuntimeError(f'Expected Qwen2.5, found {served}')
     sample=load_rows(args.n_wrong,args.n_correct,args.seed)
-    run_id=f"qwen25_nw{args.n_wrong}_nc{args.n_correct}_seed{args.seed}_detp5_raicl_vgate"
+    run_id=f"qwen25_nw{args.n_wrong}_nc{args.n_correct}_seed{args.seed}_{args.det_prompt}_{args.correction_prompt}_{args.verdict_prompt}"
     out_dir=OUT_ROOT/run_id; out_dir.mkdir(parents=True,exist_ok=True)
     print(f'served_model={served} sample={len(sample)} c={args.concurrency}',flush=True)
     # Warm GTR on first item if needed later.
@@ -363,7 +562,7 @@ def main()->int:
             r['judge_final']=gpt_judge(note,r['question'],r['ground_truth'],r['final_answer'])
             if i%10==0 or i==len(rows): print(f'judged {i}/{len(rows)}',flush=True)
         write_jsonl(out_dir/'judged_outputs.jsonl',rows)
-    summary={'task':'self_detection_raicl_correction_verdict','served_model':served,'settings':vars(args),'summary':summarize(rows),'outputs':{'pipeline':str(out_dir/'pipeline_outputs.jsonl'),'judged':str(out_dir/'judged_outputs.jsonl') if args.judge else None}}
+    summary={'task':'self_detection_raicl_correction_verdict','served_model':served,'settings':vars(args),'prompt_texts':{'detection':DET_PROMPTS[args.det_prompt],'correction':COR_PROMPTS[args.correction_prompt],'verdict':VERDICT_PROMPTS[args.verdict_prompt]},'summary':summarize(rows),'outputs':{'pipeline':str(out_dir/'pipeline_outputs.jsonl'),'judged':str(out_dir/'judged_outputs.jsonl') if args.judge else None}}
     (out_dir/'summary.json').write_text(json.dumps(summary,indent=2,ensure_ascii=False))
     print(json.dumps(summary,indent=2,ensure_ascii=False))
     return 0

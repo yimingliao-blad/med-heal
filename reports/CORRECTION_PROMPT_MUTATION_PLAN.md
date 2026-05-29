@@ -63,3 +63,67 @@ python scripts/qwen25_retrieval_correction_quicktest.py   --port 8003   --concur
 ## Selection Rule
 
 Rank arms by net gain `fixes - breaks`, but inspect false corrections first. A correction arm should advance only if it keeps break count low on originally correct cases and gives usable gains on wrong cases.
+
+
+## Full Pipeline Lever Variants
+
+`scripts/run_selfdetect_raicl_verdict.py` now exposes three independent prompt selectors. This is the test surface for the current hypothesis.
+
+Detection prompt variants:
+
+- `contradiction_first`: higher-precision detection by prioritizing direct contradiction, then wrong focus, then central omission.
+- `claim_contradiction`: claim-level contradiction audit; intended to produce better retrieval payloads.
+- `p5_retrieval_payload`: previous broader detection payload baseline.
+
+Correction prompt variants:
+
+- `accept_suggestion_if_supported`: makes the correction model more willing to follow detection feedback when evidence supports it.
+- `direct_rewrite_from_feedback`: rewrites around the detected target instead of minimally preserving the old answer.
+- `contradiction_repair`: specialized repair for contradicted/unsupported claims.
+- `omission_repair`: specialized repair for missing answer-slot errors.
+- `balanced`: previous correction baseline.
+
+Verdict prompt variants:
+
+- `false_correction_sensitive`: compares original and corrected answer against discharge note and question, accepting correction only if clearly better.
+- `derive_then_compare`: privately derives a note-supported answer before choosing A/B.
+- `contradiction_count`: chooses the answer with fewer material note contradictions, then answer-slot coverage.
+- `balanced`: previous pairwise gate baseline.
+
+Recommended narrow comparison:
+
+```bash
+python scripts/run_selfdetect_raicl_verdict.py \
+  --port 8003 \
+  --concurrency 8 \
+  --n-wrong 20 \
+  --n-correct 20 \
+  --det-temperature 0.0 \
+  --correction-temperature 0.0 \
+  --verdict-temperature 0.0 \
+  --det-prompt contradiction_first \
+  --correction-prompt accept_suggestion_if_supported \
+  --verdict-prompt false_correction_sensitive \
+  --judge
+```
+
+Then swap one lever at a time:
+
+```bash
+# More correction willingness
+--correction-prompt direct_rewrite_from_feedback
+
+# Contradiction-specific correction
+--correction-prompt contradiction_repair
+
+# Verdict derives note-supported answer first
+--verdict-prompt derive_then_compare
+
+# Verdict focuses on contradictions
+--verdict-prompt contradiction_count
+
+# Broader claim-level detection
+--det-prompt claim_contradiction
+```
+
+Interpretation rule: contradiction-focused detection should lower false detections; suggestion-following correction should increase fixes among detected wrong answers; false-correction-sensitive verdict should reduce breaks on originally correct answers. The final choice should be based on net gain and break count, not only detection F1.
