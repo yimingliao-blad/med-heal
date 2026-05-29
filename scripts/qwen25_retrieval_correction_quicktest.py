@@ -18,11 +18,12 @@ import pandas as pd
 import requests
 from openai import OpenAI
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-OUT_ROOT = PROJECT_ROOT / "refactor" / "pre_atom_pipeline" / "output" / "retrieval_correction"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_REPO = Path(os.environ.get("MED_HEAL_SOURCE_REPO", PROJECT_ROOT.parent / "llm-ehr-hallucination"))
+OUT_ROOT = PROJECT_ROOT / "runs" / "retrieval_correction"
 OUT_ROOT.mkdir(parents=True, exist_ok=True)
 
-NOTE_SPAN_SRC = PROJECT_ROOT / "src" / "step9_self_correction" / "v2"
+NOTE_SPAN_SRC = SOURCE_REPO / "src" / "step9_self_correction" / "v2"
 sys.path.insert(0, str(NOTE_SPAN_SRC))
 from note_span_index import topk_spans  # noqa: E402
 
@@ -53,12 +54,12 @@ def parse_binary(text: str | None) -> int | None:
 
 
 def load_api_key() -> str:
-    env = PROJECT_ROOT / ".env"
-    if env.exists():
-        for line in env.read_text().splitlines():
-            line = line.strip()
-            if line.startswith("OPENAI_API_KEY=") and not line.startswith("#"):
-                return line.split("=", 1)[1].strip()
+    for env in (PROJECT_ROOT / ".env", SOURCE_REPO / ".env"):
+        if env.exists():
+            for line in env.read_text().splitlines():
+                line = line.strip()
+                if line.startswith("OPENAI_API_KEY=") and not line.startswith("#"):
+                    return line.split("=", 1)[1].strip()
     if os.environ.get("OPENAI_API_KEY"):
         return os.environ["OPENAI_API_KEY"]
     raise RuntimeError("OPENAI_API_KEY not found")
@@ -132,7 +133,7 @@ def vllm_chat(system: str, user: str, port: int, max_tokens: int = 512, temperat
 
 
 def load_notes_lookup() -> dict[str, str]:
-    df = pd.read_json(PROJECT_ROOT / "output" / "EHRNoteQA_processed.jsonl", lines=True)
+    df = pd.read_json(SOURCE_REPO / "output" / "EHRNoteQA_processed.jsonl", lines=True)
     out = {}
     for _, r in df.iterrows():
         parts = []
@@ -147,7 +148,7 @@ def load_notes_lookup() -> dict[str, str]:
 def load_qwen25_rows() -> list[dict[str, Any]]:
     rows = []
     for fold in range(5):
-        p = PROJECT_ROOT / "output" / "step8" / "qwen2.5-7b-instruct" / f"fold_{fold}" / "zeroshot_evaluated_binary.csv"
+        p = SOURCE_REPO / "output" / "step8" / "qwen2.5-7b-instruct" / f"fold_{fold}" / "zeroshot_evaluated_binary.csv"
         df = pd.read_csv(p)
         for _, r in df.iterrows():
             rows.append({
@@ -163,7 +164,7 @@ def load_qwen25_rows() -> list[dict[str, Any]]:
 
 
 def load_taxonomy() -> dict[tuple[int, int], dict[str, Any]]:
-    p = PROJECT_ROOT / "src" / "step9_self_correction" / "error_taxonomy" / "phase1_wrong_gpt4o.json"
+    p = SOURCE_REPO / "src" / "step9_self_correction" / "error_taxonomy" / "phase1_wrong_gpt4o.json"
     items = json.loads(p.read_text())
     return {(int(r["fold"]), int(r["idx"])): r for r in items}
 
@@ -236,15 +237,63 @@ CORRECTION_SYSTEM = (
 )
 
 
-def build_correction_user(row: dict[str, Any], spans: list[dict[str, Any]], arm: str) -> str:
+CORRECTION_ARMS: dict[str, str] = {
+    "evidence_only": (
+        "Use the evidence spans to check the previous answer. Return the best final answer. "
+        "If the previous answer is already correct, keep it."
+    ),
+    "conservative_keep_gate": (
+        "You are allowed to edit the previous answer only when the retrieved evidence clearly proves a material error. "
+        "If the evidence is incomplete, ambiguous, or merely adds nonessential detail, keep the previous answer. "
+        "Return only the final answer."
+    ),
+    "quote_then_revise": (
+        "First identify the one or two evidence spans that control the answer. Then revise only the parts of the previous answer that those spans prove wrong or incomplete. "
+        "The final answer should be concise and should not mention the audit process."
+    ),
+    "minimal_patch": (
+        "Make the smallest possible edit to the previous answer. Preserve any correct content, remove unsupported claims, and add only missing facts directly supported by the evidence. "
+        "Return the patched final answer, not an explanation."
+    ),
+    "answer_from_evidence_then_compare": (
+        "Draft the answer from the retrieved evidence alone, then compare it with the previous answer. "
+        "If they mean the same thing, keep the previous answer. If the evidence-only draft changes the clinical answer, return the evidence-supported draft."
+    ),
+    "contradiction_first": (
+        "Look first for any claim in the previous answer that the evidence contradicts. Replace contradicted claims with the evidence-supported fact. "
+        "If there is no contradiction, do not revise for stylistic or minor completeness reasons."
+    ),
+    "omission_first": (
+        "Identify the exact answer slot requested by the question. If the previous answer omits a required slot that appears in the evidence, add it. "
+        "Do not add background details that are not required to answer the question."
+    ),
+    "focus_first": (
+        "Identify the visit, date, time period, procedure, medication, symptom, or outcome asked by the question before editing. "
+        "If the previous answer addresses the wrong focus, rewrite it to answer the requested focus using the evidence. Otherwise keep it unless there is a material contradiction or omission."
+    ),
+    "claim_table_private": (
+        "Privately check the previous answer claim by claim against the evidence. Keep supported claims, delete unsupported claims, and add required missing facts. "
+        "Return only the final answer without the claim table."
+    ),
+    "error_type_router": (
+        "Use the suspected error type as a weak routing hint, not as truth. For contradiction or fabrication, remove or replace unsupported claims. "
+        "For omission, add the missing required answer fact. For question misalignment, refocus on the asked visit/date/aspect. Return only the corrected final answer."
+    ),
+    "no_new_entities": (
+        "Revise only using entities, dates, treatments, diagnoses, and outcomes that appear in the retrieved evidence or previous answer. "
+        "Do not introduce new clinical entities from general knowledge. If evidence does not support a change, keep the previous answer."
+    ),
+    "abstain_if_uncertain": (
+        "If the retrieved evidence is not sufficient to prove a better answer, return the previous answer exactly. "
+        "Only change the answer when the correction is directly supported by an evidence span."
+    ),
+}
+
+
+def taxonomy_instruction(row: dict[str, Any], arm: str) -> str:
     tax = row.get("taxonomy") or {}
     primary = tax.get("primary_error") or "UNKNOWN"
-    if arm == "evidence_only":
-        instruction = (
-            "Use the evidence spans to check the previous answer. Return the best final answer. "
-            "If the previous answer is already correct, keep it."
-        )
-    elif arm == "taxonomy_evidence":
+    if arm == "taxonomy_evidence":
         if primary in {"MISREADING", "FABRICATION"}:
             action = "Look for contradicted or unsupported claims, then replace or remove them."
         elif primary == "OMISSION":
@@ -253,18 +302,23 @@ def build_correction_user(row: dict[str, Any], spans: list[dict[str, Any]], arm:
             action = "First identify the exact visit, date, or aspect asked by the question, then answer that target."
         else:
             action = "Check whether the prior answer directly answers the question and is supported by the spans."
-        instruction = (
-            f"The suspected error type is {primary}. {action} "
-            "Return the best final answer in 1-3 sentences."
-        )
-    elif arm == "oracle_error_description":
-        instruction = (
+        return f"The suspected error type is {primary}. {action} Return the best final answer in 1-3 sentences."
+    if arm == "oracle_error_description":
+        return (
             f"The suspected error type is {primary}. Prior error analysis: "
             f"{tax.get('error_description', '')} "
             "Use this only as a hint; the final answer must be supported by the note evidence."
         )
-    else:
-        raise ValueError(f"unknown arm: {arm}")
+    if arm == "error_type_router":
+        return f"Suspected error type from prior audit: {primary}. " + CORRECTION_ARMS[arm]
+    try:
+        return CORRECTION_ARMS[arm]
+    except KeyError as e:
+        raise ValueError(f"unknown arm: {arm}") from e
+
+
+def build_correction_user(row: dict[str, Any], spans: list[dict[str, Any]], arm: str) -> str:
+    instruction = taxonomy_instruction(row, arm)
     return f"""Discharge note:
 {row['note'][:18000]}
 
@@ -361,7 +415,7 @@ def main() -> int:
     ap.add_argument("--n-correct", type=int, default=109)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--k", type=int, default=5)
-    ap.add_argument("--arms", nargs="+", default=["evidence_only", "taxonomy_evidence"])
+    ap.add_argument("--arms", nargs="+", default=["evidence_only", "taxonomy_evidence"], choices=sorted(set(CORRECTION_ARMS) | {"taxonomy_evidence", "oracle_error_description"}))
     ap.add_argument("--retrieval-mode", default="gtr_q_answer", choices=["gtr_question", "gtr_q_answer", "gtr_oracle_error"])
     ap.add_argument("--judge", action="store_true", help="Run sequential GPT-4o judge after vLLM generation")
     args = ap.parse_args()
@@ -371,7 +425,9 @@ def main() -> int:
         raise RuntimeError(f"Expected Qwen2.5 on port {args.port}, found {served}")
 
     sample = make_sample(args.n_wrong, args.n_correct, args.seed)
-    run_id = f"qwen25_{args.retrieval_mode}_nw{args.n_wrong}_nc{args.n_correct}_seed{args.seed}"
+    arm_tag = "-".join(args.arms)
+    arm_tag = re.sub(r"[^A-Za-z0-9_.-]+", "_", arm_tag)[:120]
+    run_id = f"qwen25_{args.retrieval_mode}_nw{args.n_wrong}_nc{args.n_correct}_seed{args.seed}_{arm_tag}"
     out_dir = OUT_ROOT / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -438,6 +494,7 @@ def main() -> int:
             "seed": args.seed,
             "k": args.k,
             "arms": args.arms,
+            "arm_prompts": {arm: taxonomy_instruction({"taxonomy": {"primary_error": "UNKNOWN"}}, arm) for arm in args.arms},
             "retrieval_mode": args.retrieval_mode,
             "generation_temperature": 0.0,
             "judge": "gpt-4o old stage1 prompt temperature 0.1 sequential" if args.judge else None,
