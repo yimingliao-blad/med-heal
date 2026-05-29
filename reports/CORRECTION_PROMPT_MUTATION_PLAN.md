@@ -127,3 +127,20 @@ Then swap one lever at a time:
 ```
 
 Interpretation rule: contradiction-focused detection should lower false detections; suggestion-following correction should increase fixes among detected wrong answers; false-correction-sensitive verdict should reduce breaks on originally correct answers. The final choice should be based on net gain and break count, not only detection F1.
+
+
+## 20/20 Qwen2.5 Screen Results
+
+Date: 2026-05-28. Sample: seed 42, 20 originally wrong + 20 originally correct Qwen2.5 zero-shot answers. Local generation used Qwen2.5 vLLM on port 8003 with `temperature=0.0`; final labels used the fixed GPT-4o judge with the old Stage 1 prompt. Verdict `k=1` for speed.
+
+| Detection | Correction | Verdict | Detected | Accepted | Fix | Break | Net | Comment |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| `contradiction_first` | `accept_suggestion_if_supported` | `false_correction_sensitive` | 3 | 3 | 1 | 1 | 0 | Too conservative, but still broke one accepted correction. |
+| `claim_contradiction` | `accept_suggestion_if_supported` | `false_correction_sensitive` | 5 | 3 | 2 | 0 | 2 | Best detection setting in this screen. |
+| `p5_retrieval_payload` | `accept_suggestion_if_supported` | `false_correction_sensitive` | 9 | 4 | 0 | 1 | -1 | Broader detection over-triggered without useful fixes. |
+| `claim_contradiction` | `direct_rewrite_from_feedback` | `false_correction_sensitive` | 5 | 3 | 2 | 0 | 2 | More forceful rewrite did not change final net. |
+| `claim_contradiction` | `contradiction_repair` | `false_correction_sensitive` | 6 | 3 | 2 | 0 | 2 | Contradiction-specialized correction did not improve beyond baseline. |
+| `claim_contradiction` | `accept_suggestion_if_supported` | `derive_then_compare` | 6 | 3 | 2 | 0 | 2 | Verdict derive-first behaved like false-correction-sensitive gate. |
+| `claim_contradiction` | `accept_suggestion_if_supported` | `contradiction_count` | 6 | 3 | 2 | 0 | 2 | Contradiction-count gate behaved like derive-first gate. |
+
+Current working read: detection is the active bottleneck. `claim_contradiction` is less conservative than `contradiction_first` but avoids the over-triggering seen with p5. The correction and verdict mutations were not harmful, but did not create extra accepted fixes on this sample. Next screen should scale `claim_contradiction + accept_suggestion_if_supported + false_correction_sensitive` to a larger matched set, then inspect the detected-but-rejected cases to decide whether correction or verdict needs another mutation.
