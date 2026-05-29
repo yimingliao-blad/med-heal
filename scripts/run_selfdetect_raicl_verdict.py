@@ -148,6 +148,43 @@ RETRIEVAL_QUERY_3: short query using key clinical entities
 CORRECTION_HINT: one sentence telling the corrector what to change
 WHY: one short explanation"""
 
+DET_SLOT_REASONED = """Discharge note:
+{note}
+
+Question:
+{question}
+
+Answer to audit:
+{answer}
+
+Use a short, staged audit. Do not write a long explanation; use the stages only to make the final fields reliable.
+
+Stage 1 - question slot: identify the exact answer type explicitly requested by the question. Slot types include NUMBER_OR_VALUE, DATE_OR_TIME, MEDICATION_OR_DOSE, LIST_OR_MULTI_PART, YES_NO_STATUS, CAUSE_REASON, PROCEDURE_EVENT, or OTHER.
+
+Stage 2 - required evidence: identify the specific note evidence needed to verify that slot. For numbers/dates/doses/lists, preserve exact values and units.
+
+Stage 3 - answer comparison: compare the answer only on central claims and the required slot. A wrong or missing central number/date/dose/list item is a critical error. A non-central missing background detail is not.
+
+Stage 4 - decision: mark INCORRECT only for a central contradiction, wrong focus, or missing central answer slot.
+
+Return exactly this template:
+QUESTION_TYPE: NUMBER_OR_VALUE or DATE_OR_TIME or MEDICATION_OR_DOSE or LIST_OR_MULTI_PART or YES_NO_STATUS or CAUSE_REASON or PROCEDURE_EVENT or OTHER
+REQUIRED_ANSWER_FORMAT: exact format/facts the answer must contain
+QUESTION_FOCUS: one sentence
+ANSWER_FOCUS: one sentence
+SLOT_CHECK: supported / contradicted / missing-central-slot / wrong-focus / sufficient
+KEY_EVIDENCE_REASON: one short sentence naming the decisive note evidence or missing evidence
+VERDICT: CORRECT or INCORRECT
+ERROR_TYPE: CONTRADICTION or QUESTION_MISALIGNMENT or OMISSION or NONE
+WRONG_CLAIM: exact central claim/value/date/list item to repair, or NONE
+CORRECT_OR_MISSING_INFO: exact note-supported replacement or required missing central slot, or NONE
+EVIDENCE_NEEDED: exact note span needed
+RETRIEVAL_QUERY_1: short query using the required slot and entities
+RETRIEVAL_QUERY_2: short query using the wrong/missing value/date/item
+RETRIEVAL_QUERY_3: short query using the question focus
+CORRECTION_HINT: one sentence telling the corrector what to change
+WHY: one short final rationale"""
+
 DET_QUESTION_SLOT = """Discharge note:
 {note}
 
@@ -191,6 +228,7 @@ DET_PROMPTS = {
     'claim_contradiction': DET_CLAIM_CONTRADICTION,
     'question_slot': DET_QUESTION_SLOT,
     'claim_slot_conservative': DET_CLAIM_SLOT_CONSERVATIVE,
+    'slot_reasoned': DET_SLOT_REASONED,
 }
 
 PARSE_SYSTEM = "Extract structured fields from a clinical self-audit. Return JSON only."
@@ -200,7 +238,7 @@ TEXT:
 {raw}
 
 Return JSON:
-{{"verdict":"CORRECT|INCORRECT|UNCLEAR", "error_type":"CONTRADICTION|OMISSION|QUESTION_MISALIGNMENT|NONE|UNCLEAR", "question_type":"string", "required_answer_format":"string", "question_focus":"string", "answer_focus":"string", "slot_check":"string", "wrong_claim":"string", "correct_or_missing_info":"string", "evidence_needed":"string", "retrieval_queries":["string"], "correction_hint":"string", "why":"string"}}"""
+{{"verdict":"CORRECT|INCORRECT|UNCLEAR", "error_type":"CONTRADICTION|OMISSION|QUESTION_MISALIGNMENT|NONE|UNCLEAR", "question_type":"string", "required_answer_format":"string", "question_focus":"string", "answer_focus":"string", "slot_check":"string", "key_evidence_reason":"string", "wrong_claim":"string", "correct_or_missing_info":"string", "evidence_needed":"string", "retrieval_queries":["string"], "correction_hint":"string", "why":"string"}}"""
 
 COR_SYSTEM = "You are a careful clinical QA assistant. Revise when same-patient evidence and detection feedback support the revision."
 
@@ -513,7 +551,7 @@ def parse_detection_regex(raw:str)->dict[str,Any]:
     for t in ['QUESTION_MISALIGNMENT','CONTRADICTION','OMISSION','NONE']:
         if t in et_s: et=t; break
     qs=[field(raw,f'RETRIEVAL_QUERY_{i}') for i in (1,2,3)]
-    return {'verdict':verdict,'error_type':et,'question_type':field(raw,'QUESTION_TYPE'),'required_answer_format':field(raw,'REQUIRED_ANSWER_FORMAT'),'question_focus':field(raw,'QUESTION_FOCUS'),'answer_focus':field(raw,'ANSWER_FOCUS'),'slot_check':field(raw,'SLOT_CHECK'),'wrong_claim':field(raw,'WRONG_CLAIM'),'correct_or_missing_info':field(raw,'CORRECT_OR_MISSING_INFO'),'evidence_needed':field(raw,'EVIDENCE_NEEDED'),'retrieval_queries':[q for q in qs if q and q.upper()!='NONE'],'correction_hint':field(raw,'CORRECTION_HINT'),'why':field(raw,'WHY'),'parse_path':'regex'}
+    return {'verdict':verdict,'error_type':et,'question_type':field(raw,'QUESTION_TYPE'),'required_answer_format':field(raw,'REQUIRED_ANSWER_FORMAT'),'question_focus':field(raw,'QUESTION_FOCUS'),'answer_focus':field(raw,'ANSWER_FOCUS'),'slot_check':field(raw,'SLOT_CHECK'),'key_evidence_reason':field(raw,'KEY_EVIDENCE_REASON'),'wrong_claim':field(raw,'WRONG_CLAIM'),'correct_or_missing_info':field(raw,'CORRECT_OR_MISSING_INFO'),'evidence_needed':field(raw,'EVIDENCE_NEEDED'),'retrieval_queries':[q for q in qs if q and q.upper()!='NONE'],'correction_hint':field(raw,'CORRECTION_HINT'),'why':field(raw,'WHY'),'parse_path':'regex'}
 
 
 def valid_detection(p:dict[str,Any])->bool:
@@ -529,7 +567,7 @@ def parse_detection(raw:str)->dict[str,Any]:
     p=parse_detection_regex(raw)
     if valid_detection(p): return p
     obj=gpt_json(PARSE_DET_USER.format(raw=(raw or '')[:5000]))
-    out={'verdict':str(obj.get('verdict','UNCLEAR')).upper(),'error_type':str(obj.get('error_type','UNCLEAR')).upper(),'question_type':str(obj.get('question_type','')),'required_answer_format':str(obj.get('required_answer_format','')),'question_focus':str(obj.get('question_focus','')),'answer_focus':str(obj.get('answer_focus','')),'slot_check':str(obj.get('slot_check','')),'wrong_claim':str(obj.get('wrong_claim','')),'correct_or_missing_info':str(obj.get('correct_or_missing_info','')),'evidence_needed':str(obj.get('evidence_needed','')),'retrieval_queries':obj.get('retrieval_queries',[]) if isinstance(obj.get('retrieval_queries',[]),list) else [],'correction_hint':str(obj.get('correction_hint','')),'why':str(obj.get('why','')),'parse_path':'gpt4o-mini'}
+    out={'verdict':str(obj.get('verdict','UNCLEAR')).upper(),'error_type':str(obj.get('error_type','UNCLEAR')).upper(),'question_type':str(obj.get('question_type','')),'required_answer_format':str(obj.get('required_answer_format','')),'question_focus':str(obj.get('question_focus','')),'answer_focus':str(obj.get('answer_focus','')),'slot_check':str(obj.get('slot_check','')),'key_evidence_reason':str(obj.get('key_evidence_reason','')),'wrong_claim':str(obj.get('wrong_claim','')),'correct_or_missing_info':str(obj.get('correct_or_missing_info','')),'evidence_needed':str(obj.get('evidence_needed','')),'retrieval_queries':obj.get('retrieval_queries',[]) if isinstance(obj.get('retrieval_queries',[]),list) else [],'correction_hint':str(obj.get('correction_hint','')),'why':str(obj.get('why','')),'parse_path':'gpt4o-mini'}
     if valid_detection(out): return out
     out['verdict']='UNCLEAR'; out['valid']=False
     return out
@@ -587,7 +625,7 @@ def retrieve_example(row:dict[str,Any], det:dict[str,Any])->dict[str,Any]|None:
     return max(pool,key=score)
 
 def retrieve_spans(row:dict[str,Any], det:dict[str,Any], k:int)->list[dict[str,Any]]:
-    queries=[row['question'],det.get('question_type',''),det.get('required_answer_format',''),det.get('question_focus',''),det.get('slot_check',''),det.get('wrong_claim',''),det.get('correct_or_missing_info',''),det.get('evidence_needed','')]+list(det.get('retrieval_queries') or [])
+    queries=[row['question'],det.get('question_type',''),det.get('required_answer_format',''),det.get('question_focus',''),det.get('slot_check',''),det.get('key_evidence_reason',''),det.get('wrong_claim',''),det.get('correct_or_missing_info',''),det.get('evidence_needed','')]+list(det.get('retrieval_queries') or [])
     return topk_spans(row['note'],queries,k=k,scoring='agreement')
 
 def render_spans(spans:list[dict[str,Any]])->str:

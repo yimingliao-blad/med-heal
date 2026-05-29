@@ -165,3 +165,17 @@ New variants:
 | `claim_slot_conservative` | `accept_suggestion_if_supported` | `false_correction_sensitive` | 5 | 3 | 0 | 1 | -1 | Slot-aware detection alone did not improve over `claim_contradiction`. |
 
 Current working read: the idea is technically useful as metadata, but not yet a better gate. Slot awareness should be used to improve retrieval/correction details after a reliable detection, not as the main reason to trigger correction. The current best 20/20 setting remains `claim_contradiction + accept_suggestion_if_supported + false_correction_sensitive` with net +2 and zero breaks.
+
+
+## Slot + Staged Reasoning Screen
+
+Added `slot_reasoned`, a staged question-slot audit that asks the model to identify the required answer slot, evidence needed, central answer comparison, and final decision. This is the CoT-style version, but constrained to short structured fields rather than free-form hidden reasoning.
+
+20/20 Qwen2.5 screen, same seed/settings:
+
+| Detection | Correction | Verdict | Detected | Accepted | Fix | Break | Net | Comment |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| `slot_reasoned` | `accept_suggestion_if_supported` | `false_correction_sensitive` | 3 | 1 | 1 | 0 | 1 | Safe but too conservative. |
+| `slot_reasoned` | `question_slot_repair` | `slot_sensitive` | 3 | 2 | 1 | 0 | 1 | Slot-aware downstream increased accepted corrections without breaks, but no extra fixes. |
+
+Current working read: staged slot reasoning fixes the over-triggering problem seen with raw `question_slot`, but it is now too conservative. It is useful for extracting metadata and safer than raw slot gating, but does not beat `claim_contradiction` on this screen.
