@@ -195,3 +195,14 @@ Added `meta_plan_confirm`, a two-step detector:
 | `meta_plan_confirm` | `accept_suggestion_if_supported` | `false_correction_sensitive` | 5 | 3 | 1 | 0 | 1 | Safer than raw slot prompting, but did not beat `claim_contradiction`. |
 
 Context check for this run: no runtime errors; max plan output 2,980 chars; max confirmation output 2,768 chars. However, 4/40 sampled notes exceeded the current 18k-character note slice, so long-note cases need dynamic evidence context rather than first-18k truncation.
+
+
+## Dynamic Context / Operation Update
+
+Added dynamic note-context modes to reduce truncation risk:
+
+- `first18k`: previous behavior.
+- `dynamic_spans`: retrieve focused spans for notes longer than threshold.
+- `dynamic_summary`: summarize focused spans and retain source spans; currently only smoke-tested.
+
+20/20 result for `meta_plan_confirm + accept_suggestion_if_supported + false_correction_sensitive` stayed net +1 with `dynamic_spans`, while avoiding long-note first-18k truncation. `operation_guided` correction with `dynamic_spans` increased fixes to 2 but introduced 1 break, net +1. The current practical conclusion is to keep dynamic spans as the safer context builder for long notes, and next test operation-guided correction with a stronger verdict gate.

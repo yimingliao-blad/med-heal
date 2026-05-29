@@ -182,6 +182,10 @@ EVIDENCE_NEEDED: exact note span needed
 RETRIEVAL_QUERY_1: short query using the required slot and entities
 RETRIEVAL_QUERY_2: short query using the wrong/missing value/date/item
 RETRIEVAL_QUERY_3: short query using the question focus
+CORRECTION_OPERATION: REPLACE_VALUE or ADD_MISSING_SLOT or REMOVE_UNSUPPORTED_CLAIM or REFOCUS_TIME_OR_VISIT or KEEP_ORIGINAL
+EVIDENCE_SUFFICIENT_FOR_CORRECTION: YES or NO
+DECISIVE_EVIDENCE: exact note evidence that proves the operation, or NONE
+DO_NOT_CHANGE: supported parts of the original answer that should be preserved, or NONE
 CORRECTION_HINT: one sentence telling the corrector what to change
 WHY: one short final rationale"""
 
@@ -308,7 +312,7 @@ TEXT:
 {raw}
 
 Return JSON:
-{{"verdict":"CORRECT|INCORRECT|UNCLEAR", "error_type":"CONTRADICTION|OMISSION|QUESTION_MISALIGNMENT|NONE|UNCLEAR", "question_type":"string", "required_answer_format":"string", "question_focus":"string", "answer_focus":"string", "slot_check":"string", "key_evidence_reason":"string", "full_contradiction":"string", "wrong_claim":"string", "correct_or_missing_info":"string", "evidence_needed":"string", "retrieval_queries":["string"], "correction_hint":"string", "why":"string"}}"""
+{{"verdict":"CORRECT|INCORRECT|UNCLEAR", "error_type":"CONTRADICTION|OMISSION|QUESTION_MISALIGNMENT|NONE|UNCLEAR", "question_type":"string", "required_answer_format":"string", "question_focus":"string", "answer_focus":"string", "slot_check":"string", "key_evidence_reason":"string", "full_contradiction":"string", "correction_operation":"string", "evidence_sufficient_for_correction":"string", "decisive_evidence":"string", "do_not_change":"string", "wrong_claim":"string", "correct_or_missing_info":"string", "evidence_needed":"string", "retrieval_queries":["string"], "correction_hint":"string", "why":"string"}}"""
 
 COR_SYSTEM = "You are a careful clinical QA assistant. Revise when same-patient evidence and detection feedback support the revision."
 
@@ -414,6 +418,32 @@ Evidence spans:
 {spans_block}
 
 Add the required missing answer fact if it is present in the evidence. Keep the answer focused on the question. Return only the final answer.""",
+    'operation_guided': """Discharge note:
+{note}
+
+Question:
+{question}
+
+Previous answer:
+{answer}
+
+Confirmed audit result:
+- error type: {error_type}
+- question type: {question_type}
+- required answer format: {required_answer_format}
+- full contradiction: {full_contradiction}
+- correction operation: {correction_operation}
+- evidence sufficient for correction: {evidence_sufficient_for_correction}
+- decisive evidence: {decisive_evidence}
+- wrong or missing part: {wrong_claim}
+- target fact/value/date/list item: {correct_or_missing_info}
+- do not change: {do_not_change}
+- correction hint: {correction_hint}
+
+Same-patient retrieved evidence:
+{spans_block}
+
+If evidence sufficient for correction is NO or the correction operation is KEEP_ORIGINAL, return the previous answer exactly. Otherwise perform only the named correction operation. Preserve supported parts listed in DO_NOT_CHANGE. Do not add facts beyond the decisive evidence and retrieved same-patient evidence. Return only the final answer.""",
     'question_slot_repair': """Discharge note:
 {note}
 
@@ -536,6 +566,27 @@ TEXT:
 
 Return JSON: {{"pick":"A|B|UNCLEAR", "reason":"string"}}"""
 
+CONTEXT_SUMMARY_SYSTEM = "You summarize discharge-note evidence for a clinical QA audit. Keep exact numbers, dates, medications, doses, and list items."
+CONTEXT_SUMMARY_USER = """Question:
+{question}
+
+Zero-shot answer:
+{answer}
+
+Audit plan or detection focus:
+{plan}
+
+Retrieved source spans from the same discharge note:
+{spans}
+
+Summarize only the evidence relevant to answering the question and checking the zero-shot answer. Preserve exact values, dates, doses, medication names, and list items. Do not add medical knowledge. End with a short line naming any evidence that is missing or not found.
+
+Return:
+FOCUSED_NOTE_SUMMARY: ...
+KEY_EVIDENCE:
+- ...
+MISSING_OR_NOT_FOUND: ..."""
+
 JUDGE_SYSTEM = "You are a medical expert evaluating an AI model's answer to a clinical question."
 
 def judge_user(note: str, question: str, ground_truth: str, answer: str) -> str:
@@ -621,7 +672,7 @@ def parse_detection_regex(raw:str)->dict[str,Any]:
     for t in ['QUESTION_MISALIGNMENT','CONTRADICTION','OMISSION','NONE']:
         if t in et_s: et=t; break
     qs=[field(raw,f'RETRIEVAL_QUERY_{i}') for i in (1,2,3)]
-    return {'verdict':verdict,'error_type':et,'question_type':field(raw,'QUESTION_TYPE'),'required_answer_format':field(raw,'REQUIRED_ANSWER_FORMAT'),'question_focus':field(raw,'QUESTION_FOCUS'),'answer_focus':field(raw,'ANSWER_FOCUS'),'slot_check':field(raw,'SLOT_CHECK'),'key_evidence_reason':field(raw,'KEY_EVIDENCE_REASON'),'full_contradiction':field(raw,'FULL_CONTRADICTION'),'wrong_claim':field(raw,'WRONG_CLAIM'),'correct_or_missing_info':field(raw,'CORRECT_OR_MISSING_INFO'),'evidence_needed':field(raw,'EVIDENCE_NEEDED'),'retrieval_queries':[q for q in qs if q and q.upper()!='NONE'],'correction_hint':field(raw,'CORRECTION_HINT'),'why':field(raw,'WHY'),'parse_path':'regex'}
+    return {'verdict':verdict,'error_type':et,'question_type':field(raw,'QUESTION_TYPE'),'required_answer_format':field(raw,'REQUIRED_ANSWER_FORMAT'),'question_focus':field(raw,'QUESTION_FOCUS'),'answer_focus':field(raw,'ANSWER_FOCUS'),'slot_check':field(raw,'SLOT_CHECK'),'key_evidence_reason':field(raw,'KEY_EVIDENCE_REASON'),'full_contradiction':field(raw,'FULL_CONTRADICTION'),'correction_operation':field(raw,'CORRECTION_OPERATION'),'evidence_sufficient_for_correction':field(raw,'EVIDENCE_SUFFICIENT_FOR_CORRECTION'),'decisive_evidence':field(raw,'DECISIVE_EVIDENCE'),'do_not_change':field(raw,'DO_NOT_CHANGE'),'wrong_claim':field(raw,'WRONG_CLAIM'),'correct_or_missing_info':field(raw,'CORRECT_OR_MISSING_INFO'),'evidence_needed':field(raw,'EVIDENCE_NEEDED'),'retrieval_queries':[q for q in qs if q and q.upper()!='NONE'],'correction_hint':field(raw,'CORRECTION_HINT'),'why':field(raw,'WHY'),'parse_path':'regex'}
 
 
 def valid_detection(p:dict[str,Any])->bool:
@@ -637,7 +688,7 @@ def parse_detection(raw:str)->dict[str,Any]:
     p=parse_detection_regex(raw)
     if valid_detection(p): return p
     obj=gpt_json(PARSE_DET_USER.format(raw=(raw or '')[:5000]))
-    out={'verdict':str(obj.get('verdict','UNCLEAR')).upper(),'error_type':str(obj.get('error_type','UNCLEAR')).upper(),'question_type':str(obj.get('question_type','')),'required_answer_format':str(obj.get('required_answer_format','')),'question_focus':str(obj.get('question_focus','')),'answer_focus':str(obj.get('answer_focus','')),'slot_check':str(obj.get('slot_check','')),'key_evidence_reason':str(obj.get('key_evidence_reason','')),'full_contradiction':str(obj.get('full_contradiction','')),'wrong_claim':str(obj.get('wrong_claim','')),'correct_or_missing_info':str(obj.get('correct_or_missing_info','')),'evidence_needed':str(obj.get('evidence_needed','')),'retrieval_queries':obj.get('retrieval_queries',[]) if isinstance(obj.get('retrieval_queries',[]),list) else [],'correction_hint':str(obj.get('correction_hint','')),'why':str(obj.get('why','')),'parse_path':'gpt4o-mini'}
+    out={'verdict':str(obj.get('verdict','UNCLEAR')).upper(),'error_type':str(obj.get('error_type','UNCLEAR')).upper(),'question_type':str(obj.get('question_type','')),'required_answer_format':str(obj.get('required_answer_format','')),'question_focus':str(obj.get('question_focus','')),'answer_focus':str(obj.get('answer_focus','')),'slot_check':str(obj.get('slot_check','')),'key_evidence_reason':str(obj.get('key_evidence_reason','')),'full_contradiction':str(obj.get('full_contradiction','')),'correction_operation':str(obj.get('correction_operation','')),'evidence_sufficient_for_correction':str(obj.get('evidence_sufficient_for_correction','')),'decisive_evidence':str(obj.get('decisive_evidence','')),'do_not_change':str(obj.get('do_not_change','')),'wrong_claim':str(obj.get('wrong_claim','')),'correct_or_missing_info':str(obj.get('correct_or_missing_info','')),'evidence_needed':str(obj.get('evidence_needed','')),'retrieval_queries':obj.get('retrieval_queries',[]) if isinstance(obj.get('retrieval_queries',[]),list) else [],'correction_hint':str(obj.get('correction_hint','')),'why':str(obj.get('why','')),'parse_path':'gpt4o-mini'}
     if valid_detection(out): return out
     out['verdict']='UNCLEAR'; out['valid']=False
     return out
@@ -707,7 +758,47 @@ def render_example(ex:dict[str,Any]|None)->str:
     return f"Question: {ex.get('question','')}\nWrong answer: {ex.get('wrong_answer','')}\nWhat was wrong: {ex.get('what_was_wrong','')}\nCorrect answer pattern: {ex.get('ground_truth','')}\nEvidence style: {ev}"
 
 
-def run_detect(row,port,temp,prompt_id)->dict[str,Any]:
+def base_note_context(row:dict[str,Any], limit:int=18000)->dict[str,Any]:
+    note=row['note']
+    return {'text': note[:limit], 'mode':'first18k', 'note_chars':len(note), 'truncated':len(note)>limit, 'spans':[], 'summary_raw':''}
+
+
+def focused_context_queries(row:dict[str,Any], plan:str='')->list[str]:
+    return [row['question'], row['answer'][:800], plan[:1200]]
+
+
+def build_note_context(row:dict[str,Any], args, port:int, plan:str='')->dict[str,Any]:
+    note=row['note']
+    if args.note_context == 'first18k' or len(note) <= args.context_threshold:
+        ctx=base_note_context(row)
+        ctx['mode']=args.note_context if args.note_context != 'first18k' else 'first18k'
+        return ctx
+    queries=focused_context_queries(row, plan)
+    spans=topk_spans(note, queries, k=args.context_k, scoring='agreement')
+    span_text=render_spans(spans)
+    header=(
+        f"QUESTION-FOCUSED NOTE CONTEXT (source note length={len(note)} chars; "
+        f"using top {len(spans)} retrieved spans because full note exceeds context threshold).\n"
+        "Use this as same-patient discharge-note evidence. Exact values/dates/medications in spans are source evidence.\n\n"
+    )
+    if args.note_context == 'dynamic_spans':
+        return {'text': header + span_text, 'mode':'dynamic_spans', 'note_chars':len(note), 'truncated':True, 'spans':spans, 'summary_raw':''}
+    if args.note_context == 'dynamic_summary':
+        summary=vllm_chat(
+            CONTEXT_SUMMARY_SYSTEM,
+            CONTEXT_SUMMARY_USER.format(question=row['question'], answer=row['answer'][:1200], plan=plan[:2500] or '(none)', spans=span_text[:6000]),
+            port,
+            700,
+            args.context_summary_temperature,
+        )
+        text=header + summary + "\n\nSOURCE SPANS:\n" + span_text
+        return {'text':text, 'mode':'dynamic_summary', 'note_chars':len(note), 'truncated':True, 'spans':spans, 'summary_raw':summary}
+    raise ValueError(f"unknown note context mode: {args.note_context}")
+
+
+def run_detect(row,port,args)->dict[str,Any]:
+    temp=args.det_temperature
+    prompt_id=args.det_prompt
     if prompt_id == 'meta_plan_confirm':
         plan_raw = vllm_chat(
             DET_SYSTEM,
@@ -716,32 +807,34 @@ def run_detect(row,port,temp,prompt_id)->dict[str,Any]:
             700,
             temp,
         )
+        note_context=build_note_context(row,args,port,plan_raw)
         raw = vllm_chat(
             DET_SYSTEM,
-            DET_META_CONFIRM.format(note=row['note'][:18000], question=row['question'], answer=row['answer'][:2000], plan=plan_raw[:3500]),
+            DET_META_CONFIRM.format(note=note_context['text'], question=row['question'], answer=row['answer'][:2000], plan=plan_raw[:3500]),
             port,
             1200,
             temp,
         )
         parsed=parse_detection(raw); parsed['valid']=valid_detection(parsed)
-        return {'raw':raw,'plan_raw':plan_raw,'parsed':parsed,'prompt':prompt_id,'temperature':temp}
+        return {'raw':raw,'plan_raw':plan_raw,'parsed':parsed,'prompt':prompt_id,'temperature':temp,'note_context':note_context}
+    note_context=build_note_context(row,args,port)
     template=DET_PROMPTS[prompt_id]
-    raw=vllm_chat(DET_SYSTEM,template.format(note=row['note'][:18000],question=row['question'],answer=row['answer'][:2000]),port,1000,temp)
+    raw=vllm_chat(DET_SYSTEM,template.format(note=note_context['text'],question=row['question'],answer=row['answer'][:2000]),port,1000,temp)
     parsed=parse_detection(raw); parsed['valid']=valid_detection(parsed)
-    return {'raw':raw,'parsed':parsed,'prompt':prompt_id,'temperature':temp}
+    return {'raw':raw,'parsed':parsed,'prompt':prompt_id,'temperature':temp,'note_context':note_context}
 
-def run_correction(row,det,spans,example,port,temp,prompt_id)->dict[str,Any]:
+def run_correction(row,note_context,det,spans,example,port,temp,prompt_id)->dict[str,Any]:
     template=COR_PROMPTS[prompt_id]
-    user=template.format(note=row['note'][:18000],question=row['question'],answer=row['answer'][:1800],error_type=det.get('error_type',''),question_type=det.get('question_type',''),required_answer_format=det.get('required_answer_format',''),question_focus=det.get('question_focus',''),answer_focus=det.get('answer_focus',''),slot_check=det.get('slot_check',''),wrong_claim=det.get('wrong_claim',''),correct_or_missing_info=det.get('correct_or_missing_info',''),correction_hint=det.get('correction_hint',''),spans_block=render_spans(spans),example_block=render_example(example))
+    user=template.format(note=note_context,question=row['question'],answer=row['answer'][:1800],error_type=det.get('error_type',''),question_type=det.get('question_type',''),required_answer_format=det.get('required_answer_format',''),question_focus=det.get('question_focus',''),answer_focus=det.get('answer_focus',''),slot_check=det.get('slot_check',''),full_contradiction=det.get('full_contradiction',''),correction_operation=det.get('correction_operation',''),evidence_sufficient_for_correction=det.get('evidence_sufficient_for_correction',''),decisive_evidence=det.get('decisive_evidence',''),do_not_change=det.get('do_not_change',''),wrong_claim=det.get('wrong_claim',''),correct_or_missing_info=det.get('correct_or_missing_info',''),correction_hint=det.get('correction_hint',''),spans_block=render_spans(spans),example_block=render_example(example))
     ans=vllm_chat(COR_SYSTEM,user,port,700,temp)
     return {'answer':ans,'temperature':temp,'prompt':prompt_id,'raicl_example':example,'spans':spans}
 
-def run_verdict(row,corr_answer,port,k,temp,prompt_id)->dict[str,Any]:
+def run_verdict(row,note_context,corr_answer,port,k,temp,prompt_id)->dict[str,Any]:
     rng=random.Random(42+(row['fold']<<16)+row['idx']); orig_a=rng.random()>0.5
     ans_a=row['answer'] if orig_a else corr_answer; ans_b=corr_answer if orig_a else row['answer']
     samples=[]
     for _ in range(k):
-        raw=vllm_chat(VERDICT_SYSTEM,VERDICT_PROMPTS[prompt_id].format(note=row['note'][:18000],question=row['question'],answer_a=ans_a[:1500],answer_b=ans_b[:1500]),port,260,temp)
+        raw=vllm_chat(VERDICT_SYSTEM,VERDICT_PROMPTS[prompt_id].format(note=note_context,question=row['question'],answer_a=ans_a[:1500],answer_b=ans_b[:1500]),port,260,temp)
         parsed=parse_verdict(raw); samples.append({'raw':raw,**parsed})
     counts=Counter(s['pick'] for s in samples); corrected_slot='B' if orig_a else 'A'; corrected_votes=counts.get(corrected_slot,0)
     a,b=counts.get('A',0),counts.get('B',0)
@@ -752,13 +845,14 @@ def run_verdict(row,corr_answer,port,k,temp,prompt_id)->dict[str,Any]:
 def process_one(row,port,args)->dict[str,Any]:
     out={k:row[k] for k in ['fold','idx','patient_id','question','ground_truth','answer','orig_label']}
     try:
-        det=run_detect(row,port,args.det_temperature,args.det_prompt); out['detection']=det
+        det=run_detect(row,port,args); out['detection']=det
         p=det['parsed']
         if p.get('verdict')!='INCORRECT' or not p.get('valid'):
             out['action']='kept_original_no_detection'; out['final_answer']=row['answer']; return out
         spans=retrieve_spans(row,p,args.k_spans); ex=retrieve_example(row,p)
-        corr=run_correction(row,p,spans,ex,port,args.correction_temperature,args.correction_prompt); out['correction']=corr
-        verdict=run_verdict(row,corr['answer'],port,args.verdict_k,args.verdict_temperature,args.verdict_prompt); out['verdict']=verdict
+        note_context=(det.get('note_context') or {}).get('text') or row['note'][:18000]
+        corr=run_correction(row,note_context,p,spans,ex,port,args.correction_temperature,args.correction_prompt); out['correction']=corr
+        verdict=run_verdict(row,note_context,corr['answer'],port,args.verdict_k,args.verdict_temperature,args.verdict_prompt); out['verdict']=verdict
         if verdict['accept_correction']:
             out['action']='accepted_correction'; out['final_answer']=corr['answer']
         else:
@@ -784,13 +878,17 @@ def main()->int:
     ap.add_argument('--n-wrong',type=int,default=2); ap.add_argument('--n-correct',type=int,default=2); ap.add_argument('--seed',type=int,default=42)
     ap.add_argument('--det-temperature',type=float,default=0.7); ap.add_argument('--correction-temperature',type=float,default=0.0); ap.add_argument('--verdict-temperature',type=float,default=0.7)
     ap.add_argument('--verdict-k',type=int,default=3); ap.add_argument('--k-spans',type=int,default=5); ap.add_argument('--judge',action='store_true')
+    ap.add_argument('--note-context',choices=['first18k','dynamic_spans','dynamic_summary'],default='first18k')
+    ap.add_argument('--context-threshold',type=int,default=16000)
+    ap.add_argument('--context-k',type=int,default=12)
+    ap.add_argument('--context-summary-temperature',type=float,default=0.0)
     ap.add_argument('--det-prompt',choices=sorted(DET_PROMPTS),default='contradiction_first')
     ap.add_argument('--correction-prompt',choices=sorted(COR_PROMPTS),default='accept_suggestion_if_supported')
     ap.add_argument('--verdict-prompt',choices=sorted(VERDICT_PROMPTS),default='false_correction_sensitive')
     args=ap.parse_args(); served=served_model_id(args.port)
     if 'qwen2.5' not in served.lower() and 'qwen2' not in served.lower(): raise RuntimeError(f'Expected Qwen2.5, found {served}')
     sample=load_rows(args.n_wrong,args.n_correct,args.seed)
-    run_id=f"qwen25_nw{args.n_wrong}_nc{args.n_correct}_seed{args.seed}_{args.det_prompt}_{args.correction_prompt}_{args.verdict_prompt}"
+    run_id=f"qwen25_nw{args.n_wrong}_nc{args.n_correct}_seed{args.seed}_{args.det_prompt}_{args.correction_prompt}_{args.verdict_prompt}_{args.note_context}"
     out_dir=OUT_ROOT/run_id; out_dir.mkdir(parents=True,exist_ok=True)
     print(f'served_model={served} sample={len(sample)} c={args.concurrency}',flush=True)
     # Warm GTR on first item if needed later.

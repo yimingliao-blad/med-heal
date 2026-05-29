@@ -120,3 +120,46 @@ The strongest current 20/20 candidate remains:
 ```
 
 Next experiment should add dynamic evidence context and an explicit `CORRECTION_OPERATION` field, then retest `meta_plan_confirm` and `claim_contradiction` on the same 20/20 sample.
+
+
+## Dynamic Context and Operation-Guided Screens
+
+Implemented context modes in `scripts/run_selfdetect_raicl_verdict.py`:
+
+- `--note-context first18k`: previous behavior.
+- `--note-context dynamic_spans`: if note length exceeds `--context-threshold`, retrieve question/answer/plan-focused spans and use them as the note context for detection, correction, and verdict.
+- `--note-context dynamic_summary`: for long notes, summarize the retrieved spans while preserving source spans underneath. This is viable but slower because it adds a local model call.
+
+The dynamic context run used the same 20/20 seed-42 sample. `dynamic_spans` replaced the full note context for 7/40 long-note cases and kept max context under 15,878 chars.
+
+| Detection | Correction | Verdict | Context | Detected | Accepted | Fix | Break | Net | Comment |
+|---|---|---|---|---:|---:|---:|---:|---:|---|
+| `meta_plan_confirm` | `accept_suggestion_if_supported` | `false_correction_sensitive` | `first18k` | 5 | 3 | 1 | 0 | 1 | Previous meta-plan baseline. |
+| `meta_plan_confirm` | `accept_suggestion_if_supported` | `false_correction_sensitive` | `dynamic_spans` | 5 | 3 | 1 | 0 | 1 | Same net, avoids first-18k truncation for long notes. |
+| `meta_plan_confirm` | `operation_guided` | `false_correction_sensitive` | `dynamic_spans` | 6 | 5 | 2 | 1 | 1 | More willing to correct, but introduced one break. |
+| `meta_plan_confirm` | `accept_suggestion_if_supported` | `false_correction_sensitive` | `dynamic_summary`, 5/5 smoke | 3 | 2 | 2 | 1 | 1 | Viable, but one break in small smoke; needs more testing before promotion. |
+
+Interpretation: dynamic spans solve the long-note truncation issue without changing net performance on this screen. Operation-guided correction increases fixes but also break risk, so the next useful mutation is not more aggressive correction; it is a stricter verdict/evidence-sufficiency gate for `operation_guided`.
+
+Recommended next test:
+
+```bash
+python scripts/run_selfdetect_raicl_verdict.py \
+  --port 8003 \
+  --concurrency 8 \
+  --n-wrong 20 \
+  --n-correct 20 \
+  --det-temperature 0.0 \
+  --correction-temperature 0.0 \
+  --verdict-temperature 0.0 \
+  --verdict-k 3 \
+  --det-prompt meta_plan_confirm \
+  --correction-prompt operation_guided \
+  --verdict-prompt false_correction_sensitive \
+  --note-context dynamic_spans \
+  --context-threshold 16000 \
+  --context-k 12 \
+  --judge
+```
+
+The `k=3` verdict should test whether the one break is a single-sample gate instability or a systematic false correction.
