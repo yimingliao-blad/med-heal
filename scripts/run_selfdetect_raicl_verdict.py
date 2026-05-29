@@ -108,10 +108,89 @@ RETRIEVAL_QUERY_3: short query
 CORRECTION_HINT: one sentence
 WHY: one short explanation"""
 
+DET_CLAIM_SLOT_CONSERVATIVE = """Discharge note:
+{note}
+
+Question:
+{question}
+
+Answer to audit:
+{answer}
+
+Audit the answer with two gates.
+
+Gate 1: identify the exact answer slot only from what the question explicitly asks for. Slot types include NUMBER_OR_VALUE, DATE_OR_TIME, MEDICATION_OR_DOSE, LIST_OR_MULTI_PART, YES_NO_STATUS, CAUSE_REASON, PROCEDURE_EVENT, or OTHER.
+
+Gate 2: check the answer's central claims against the discharge note. Mark INCORRECT only if one of these is true:
+- the answer gives a central number/date/time/dose/list item that conflicts with the note;
+- the question explicitly asks for a number/date/time/dose/list/status/reason/event and the answer omits that central required slot;
+- the answer targets the wrong visit/date/aspect;
+- a central clinical claim is contradicted by the note.
+
+Be conservative. Do not flag missing background details, harmless wording differences, or extra non-central details. For list questions, require that a missing/extra item changes the clinical answer.
+
+Return exactly this template:
+QUESTION_TYPE: NUMBER_OR_VALUE or DATE_OR_TIME or MEDICATION_OR_DOSE or LIST_OR_MULTI_PART or YES_NO_STATUS or CAUSE_REASON or PROCEDURE_EVENT or OTHER
+REQUIRED_ANSWER_FORMAT: what central answer slot must be present
+CLAIM_CHECK:
+- claim: ... | status: supported/contradicted/not-central/wrong-focus | evidence target: ...
+VERDICT: CORRECT or INCORRECT
+ERROR_TYPE: CONTRADICTION or QUESTION_MISALIGNMENT or OMISSION or NONE
+QUESTION_FOCUS: one sentence
+ANSWER_FOCUS: one sentence
+SLOT_CHECK: whether the central slot is present and correct
+WRONG_CLAIM: exact central claim/value/date/list item to repair, or NONE
+CORRECT_OR_MISSING_INFO: exact note-supported replacement or required missing central slot, or NONE
+EVIDENCE_NEEDED: exact note span needed
+RETRIEVAL_QUERY_1: short query using the central required slot
+RETRIEVAL_QUERY_2: short query using the wrong/missing value/date/item
+RETRIEVAL_QUERY_3: short query using key clinical entities
+CORRECTION_HINT: one sentence telling the corrector what to change
+WHY: one short explanation"""
+
+DET_QUESTION_SLOT = """Discharge note:
+{note}
+
+Question:
+{question}
+
+Answer to audit:
+{answer}
+
+First classify what the question is asking for. Pay special attention to exact answer formats:
+- NUMBER_OR_VALUE: counts, doses, lab values, vital signs, percentages, durations, scores.
+- DATE_OR_TIME: date, time, admission/discharge timing, sequence, before/after.
+- MEDICATION_OR_DOSE: drug names, starts/stops, dose, route, frequency.
+- LIST_OR_MULTI_PART: multiple treatments, diagnoses, complications, reasons, follow-up items.
+- YES_NO_STATUS: presence/absence, resolved/not resolved, performed/not performed.
+- CAUSE_REASON: why something happened or rationale.
+- PROCEDURE_EVENT: procedures, complications, clinical events, outcomes.
+
+Then compare the answer against that required slot. For number/date/time/list questions, mark INCORRECT if the answer omits, changes, rounds incorrectly, or substitutes the required value/date/list. For list questions, mark INCORRECT only when a required central item is missing or an unsupported central item is added. For contradiction, identify the exact claim and the note-supported replacement.
+
+Return exactly this template:
+QUESTION_TYPE: NUMBER_OR_VALUE or DATE_OR_TIME or MEDICATION_OR_DOSE or LIST_OR_MULTI_PART or YES_NO_STATUS or CAUSE_REASON or PROCEDURE_EVENT or OTHER
+REQUIRED_ANSWER_FORMAT: what the answer must contain, including number/date/list requirements
+QUESTION_FOCUS: one sentence
+ANSWER_FOCUS: one sentence
+SLOT_CHECK: whether the answer provides the required value/date/list/status/reason/event
+VERDICT: CORRECT or INCORRECT
+ERROR_TYPE: CONTRADICTION or QUESTION_MISALIGNMENT or OMISSION or NONE
+WRONG_CLAIM: exact claim/value/date/list item to repair, or NONE
+CORRECT_OR_MISSING_INFO: exact note-supported replacement or required missing fact, or NONE
+EVIDENCE_NEEDED: exact note span needed, naming numbers/dates/items if relevant
+RETRIEVAL_QUERY_1: short query using the required answer slot
+RETRIEVAL_QUERY_2: short query using the wrong/missing value/date/item
+RETRIEVAL_QUERY_3: short query using key clinical entities
+CORRECTION_HINT: one sentence telling the corrector what to change, preserving required numbers/dates/lists
+WHY: one short explanation"""
+
 DET_PROMPTS = {
     'p5_retrieval_payload': DET_P5,
     'contradiction_first': DET_CONTRADICTION_FIRST,
     'claim_contradiction': DET_CLAIM_CONTRADICTION,
+    'question_slot': DET_QUESTION_SLOT,
+    'claim_slot_conservative': DET_CLAIM_SLOT_CONSERVATIVE,
 }
 
 PARSE_SYSTEM = "Extract structured fields from a clinical self-audit. Return JSON only."
@@ -121,7 +200,7 @@ TEXT:
 {raw}
 
 Return JSON:
-{{"verdict":"CORRECT|INCORRECT|UNCLEAR", "error_type":"CONTRADICTION|OMISSION|QUESTION_MISALIGNMENT|NONE|UNCLEAR", "question_focus":"string", "answer_focus":"string", "wrong_claim":"string", "correct_or_missing_info":"string", "evidence_needed":"string", "retrieval_queries":["string"], "correction_hint":"string", "why":"string"}}"""
+{{"verdict":"CORRECT|INCORRECT|UNCLEAR", "error_type":"CONTRADICTION|OMISSION|QUESTION_MISALIGNMENT|NONE|UNCLEAR", "question_type":"string", "required_answer_format":"string", "question_focus":"string", "answer_focus":"string", "slot_check":"string", "wrong_claim":"string", "correct_or_missing_info":"string", "evidence_needed":"string", "retrieval_queries":["string"], "correction_hint":"string", "why":"string"}}"""
 
 COR_SYSTEM = "You are a careful clinical QA assistant. Revise when same-patient evidence and detection feedback support the revision."
 
@@ -227,6 +306,32 @@ Evidence spans:
 {spans_block}
 
 Add the required missing answer fact if it is present in the evidence. Keep the answer focused on the question. Return only the final answer.""",
+    'question_slot_repair': """Discharge note:
+{note}
+
+Question:
+{question}
+
+Previous answer:
+{answer}
+
+Question-slot analysis from detection:
+- question type: {question_type}
+- required answer format: {required_answer_format}
+- question focus: {question_focus}
+- answer focus: {answer_focus}
+- slot check: {slot_check}
+- wrong or missing part: {wrong_claim}
+- target fact/value/date/list item: {correct_or_missing_info}
+- correction hint: {correction_hint}
+
+Same-patient evidence:
+{spans_block}
+
+Correction example from another patient, for pattern only:
+{example_block}
+
+Write the final answer so it satisfies the required answer format. Preserve exact numbers, dates, time periods, medication names, doses, frequencies, and list items when the question asks for them. If the previous answer has the wrong value/date/item, replace it with the evidence-supported one. If a required central list item is missing, add it. Do not add background details that are not needed by the question. Return only the final answer.""",
 }
 
 VERDICT_SYSTEM = "You are a strict medical expert comparing two answers against the discharge note and question."
@@ -299,6 +404,22 @@ Count material contradictions with the discharge summary in each answer. Also ch
 
 Reply on the FIRST line with exactly one letter: A or B
 On the SECOND line, give one short reason.""",
+    'slot_sensitive': """Discharge summary:
+{note}
+
+Question:
+{question}
+
+ANSWER A:
+{answer_a}
+
+ANSWER B:
+{answer_b}
+
+Identify what exact answer slot the question requires before choosing. Pay attention to whether the question asks for a number/value, date/time, medication/dose/frequency, multi-item list, yes/no status, cause/reason, procedure/event, or outcome. Choose the answer that best preserves the required slot from the discharge summary. Penalize wrong or missing numbers, dates, doses, time periods, central list items, and unsupported substitutions. If both answers satisfy the slot equally, prefer the original answer.
+
+Reply on the FIRST line with exactly one letter: A or B
+On the SECOND line, give one short reason naming the slot.""",
 }
 PARSE_VERDICT_USER = """The text below was supposed to pick answer A or B. Extract the pick. If unclear, return UNCLEAR.
 
@@ -392,7 +513,7 @@ def parse_detection_regex(raw:str)->dict[str,Any]:
     for t in ['QUESTION_MISALIGNMENT','CONTRADICTION','OMISSION','NONE']:
         if t in et_s: et=t; break
     qs=[field(raw,f'RETRIEVAL_QUERY_{i}') for i in (1,2,3)]
-    return {'verdict':verdict,'error_type':et,'question_focus':field(raw,'QUESTION_FOCUS'),'answer_focus':field(raw,'ANSWER_FOCUS'),'wrong_claim':field(raw,'WRONG_CLAIM'),'correct_or_missing_info':field(raw,'CORRECT_OR_MISSING_INFO'),'evidence_needed':field(raw,'EVIDENCE_NEEDED'),'retrieval_queries':[q for q in qs if q and q.upper()!='NONE'],'correction_hint':field(raw,'CORRECTION_HINT'),'why':field(raw,'WHY'),'parse_path':'regex'}
+    return {'verdict':verdict,'error_type':et,'question_type':field(raw,'QUESTION_TYPE'),'required_answer_format':field(raw,'REQUIRED_ANSWER_FORMAT'),'question_focus':field(raw,'QUESTION_FOCUS'),'answer_focus':field(raw,'ANSWER_FOCUS'),'slot_check':field(raw,'SLOT_CHECK'),'wrong_claim':field(raw,'WRONG_CLAIM'),'correct_or_missing_info':field(raw,'CORRECT_OR_MISSING_INFO'),'evidence_needed':field(raw,'EVIDENCE_NEEDED'),'retrieval_queries':[q for q in qs if q and q.upper()!='NONE'],'correction_hint':field(raw,'CORRECTION_HINT'),'why':field(raw,'WHY'),'parse_path':'regex'}
 
 
 def valid_detection(p:dict[str,Any])->bool:
@@ -408,7 +529,7 @@ def parse_detection(raw:str)->dict[str,Any]:
     p=parse_detection_regex(raw)
     if valid_detection(p): return p
     obj=gpt_json(PARSE_DET_USER.format(raw=(raw or '')[:5000]))
-    out={'verdict':str(obj.get('verdict','UNCLEAR')).upper(),'error_type':str(obj.get('error_type','UNCLEAR')).upper(),'question_focus':str(obj.get('question_focus','')),'answer_focus':str(obj.get('answer_focus','')),'wrong_claim':str(obj.get('wrong_claim','')),'correct_or_missing_info':str(obj.get('correct_or_missing_info','')),'evidence_needed':str(obj.get('evidence_needed','')),'retrieval_queries':obj.get('retrieval_queries',[]) if isinstance(obj.get('retrieval_queries',[]),list) else [],'correction_hint':str(obj.get('correction_hint','')),'why':str(obj.get('why','')),'parse_path':'gpt4o-mini'}
+    out={'verdict':str(obj.get('verdict','UNCLEAR')).upper(),'error_type':str(obj.get('error_type','UNCLEAR')).upper(),'question_type':str(obj.get('question_type','')),'required_answer_format':str(obj.get('required_answer_format','')),'question_focus':str(obj.get('question_focus','')),'answer_focus':str(obj.get('answer_focus','')),'slot_check':str(obj.get('slot_check','')),'wrong_claim':str(obj.get('wrong_claim','')),'correct_or_missing_info':str(obj.get('correct_or_missing_info','')),'evidence_needed':str(obj.get('evidence_needed','')),'retrieval_queries':obj.get('retrieval_queries',[]) if isinstance(obj.get('retrieval_queries',[]),list) else [],'correction_hint':str(obj.get('correction_hint','')),'why':str(obj.get('why','')),'parse_path':'gpt4o-mini'}
     if valid_detection(out): return out
     out['verdict']='UNCLEAR'; out['valid']=False
     return out
@@ -466,7 +587,7 @@ def retrieve_example(row:dict[str,Any], det:dict[str,Any])->dict[str,Any]|None:
     return max(pool,key=score)
 
 def retrieve_spans(row:dict[str,Any], det:dict[str,Any], k:int)->list[dict[str,Any]]:
-    queries=[row['question'],det.get('question_focus',''),det.get('wrong_claim',''),det.get('correct_or_missing_info',''),det.get('evidence_needed','')]+list(det.get('retrieval_queries') or [])
+    queries=[row['question'],det.get('question_type',''),det.get('required_answer_format',''),det.get('question_focus',''),det.get('slot_check',''),det.get('wrong_claim',''),det.get('correct_or_missing_info',''),det.get('evidence_needed','')]+list(det.get('retrieval_queries') or [])
     return topk_spans(row['note'],queries,k=k,scoring='agreement')
 
 def render_spans(spans:list[dict[str,Any]])->str:
@@ -486,7 +607,7 @@ def run_detect(row,port,temp,prompt_id)->dict[str,Any]:
 
 def run_correction(row,det,spans,example,port,temp,prompt_id)->dict[str,Any]:
     template=COR_PROMPTS[prompt_id]
-    user=template.format(note=row['note'][:18000],question=row['question'],answer=row['answer'][:1800],error_type=det.get('error_type',''),question_focus=det.get('question_focus',''),wrong_claim=det.get('wrong_claim',''),correct_or_missing_info=det.get('correct_or_missing_info',''),correction_hint=det.get('correction_hint',''),spans_block=render_spans(spans),example_block=render_example(example))
+    user=template.format(note=row['note'][:18000],question=row['question'],answer=row['answer'][:1800],error_type=det.get('error_type',''),question_type=det.get('question_type',''),required_answer_format=det.get('required_answer_format',''),question_focus=det.get('question_focus',''),answer_focus=det.get('answer_focus',''),slot_check=det.get('slot_check',''),wrong_claim=det.get('wrong_claim',''),correct_or_missing_info=det.get('correct_or_missing_info',''),correction_hint=det.get('correction_hint',''),spans_block=render_spans(spans),example_block=render_example(example))
     ans=vllm_chat(COR_SYSTEM,user,port,700,temp)
     return {'answer':ans,'temperature':temp,'prompt':prompt_id,'raicl_example':example,'spans':spans}
 

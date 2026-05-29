@@ -144,3 +144,24 @@ Date: 2026-05-28. Sample: seed 42, 20 originally wrong + 20 originally correct Q
 | `claim_contradiction` | `accept_suggestion_if_supported` | `contradiction_count` | 6 | 3 | 2 | 0 | 2 | Contradiction-count gate behaved like derive-first gate. |
 
 Current working read: detection is the active bottleneck. `claim_contradiction` is less conservative than `contradiction_first` but avoids the over-triggering seen with p5. The correction and verdict mutations were not harmful, but did not create extra accepted fixes on this sample. Next screen should scale `claim_contradiction + accept_suggestion_if_supported + false_correction_sensitive` to a larger matched set, then inspect the detected-but-rejected cases to decide whether correction or verdict needs another mutation.
+
+
+## Question-Type / Answer-Slot Screen
+
+Added question-type-aware variants after observing that some EHRNoteQA questions require exact numbers, dates, medications/doses, time periods, or multi-item lists. The new prompt fields are `QUESTION_TYPE`, `REQUIRED_ANSWER_FORMAT`, and `SLOT_CHECK`; retrieval queries now include those fields.
+
+New variants:
+
+- Detection: `question_slot`, `claim_slot_conservative`
+- Correction: `question_slot_repair`
+- Verdict: `slot_sensitive`
+
+20/20 Qwen2.5 screen, same seed/settings as above:
+
+| Detection | Correction | Verdict | Detected | Accepted | Fix | Break | Net | Comment |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| `question_slot` | `question_slot_repair` | `slot_sensitive` | 14 | 7 | 0 | 1 | -1 | Raw slot-aware path over-triggered; slot attention alone is too broad. |
+| `claim_slot_conservative` | `question_slot_repair` | `slot_sensitive` | 4 | 2 | 2 | 1 | 1 | Conservative slot gate reduced over-triggering, but slot-aware repair/verdict still broke one correct case. |
+| `claim_slot_conservative` | `accept_suggestion_if_supported` | `false_correction_sensitive` | 5 | 3 | 0 | 1 | -1 | Slot-aware detection alone did not improve over `claim_contradiction`. |
+
+Current working read: the idea is technically useful as metadata, but not yet a better gate. Slot awareness should be used to improve retrieval/correction details after a reliable detection, not as the main reason to trigger correction. The current best 20/20 setting remains `claim_contradiction + accept_suggestion_if_supported + false_correction_sensitive` with net +2 and zero breaks.
