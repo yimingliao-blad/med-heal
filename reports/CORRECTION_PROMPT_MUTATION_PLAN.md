@@ -179,3 +179,19 @@ Added `slot_reasoned`, a staged question-slot audit that asks the model to ident
 | `slot_reasoned` | `question_slot_repair` | `slot_sensitive` | 3 | 2 | 1 | 0 | 1 | Slot-aware downstream increased accepted corrections without breaks, but no extra fixes. |
 
 Current working read: staged slot reasoning fixes the over-triggering problem seen with raw `question_slot`, but it is now too conservative. It is useful for extracting metadata and safer than raw slot gating, but does not beat `claim_contradiction` on this screen.
+
+
+## Meta-Plan Then Confirm Screen
+
+Added `meta_plan_confirm`, a two-step detector:
+
+1. **Plan prompt** reads only the question and zero-shot answer. It identifies the required answer slot, likely contradiction/omission/focus risks, and a checklist of what evidence to verify.
+2. **Confirm prompt** reads the discharge note plus the plan. It verifies each item one by one, distinguishes full contradiction from partial conflict or note silence, and returns the usual correction payload.
+
+20/20 Qwen2.5 screen, same seed/settings:
+
+| Detection | Correction | Verdict | Detected | Accepted | Fix | Break | Net | Comment |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| `meta_plan_confirm` | `accept_suggestion_if_supported` | `false_correction_sensitive` | 5 | 3 | 1 | 0 | 1 | Safer than raw slot prompting, but did not beat `claim_contradiction`. |
+
+Context check for this run: no runtime errors; max plan output 2,980 chars; max confirmation output 2,768 chars. However, 4/40 sampled notes exceeded the current 18k-character note slice, so long-note cases need dynamic evidence context rather than first-18k truncation.
