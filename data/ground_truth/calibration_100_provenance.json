@@ -1,0 +1,20 @@
+{
+  "artifact": "human + GPT-4o calibration baseline (BioMistral-7B open-ended)",
+  "purpose": "Record human truth (gold) and machine truth (GPT-4o judge label) per case for the calibration baseline.",
+  "n": 100,
+  "source_pool": "Sara \u2229 Jose unanimous human-agreement subset, N=112 (build_gold_112.py)",
+  "human_gold": "Sara==Jose unanimous label (1=correct,0=incorrect)",
+  "machine_label": "gpt_4o_label = Stage-1 binary GPT-4o judge",
+  "sampling": {
+    "method": "random.Random(seed).sample(range(112),100), file order",
+    "seed": 78
+  },
+  "agreement_this_100": "94/100 = 94%",
+  "kappa_note": "see calibration script",
+  "disagreements_this_100": {
+    "false_neg_gold1_gpt0": 5,
+    "false_pos_gold0_gpt1": 1
+  },
+  "full_112_baseline": "102/112 = 91.1% (this 100-subsample is the upper tail; full pool is the unbiased baseline)",
+  "raw_human_export": "NOT included by design; only the resolved human gold + GPT label are kept."
+}

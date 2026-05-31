@@ -7,9 +7,7 @@
     "folds_dir": "../llm-ehr-hallucination/output/folds",
     "step8_output_dir": "../llm-ehr-hallucination/output/step8",
     "step9_v2_output_dir": "../llm-ehr-hallucination/output/step9_v2",
-    "human_eval_csv": "../llm-ehr-hallucination/datasets/external/all_users_openended_BioMistral-7B_1775740232208.csv",
-    "human_gold_100": "../llm-ehr-hallucination/output/step9_v2/sample100_gold_seed42.csv",
-    "human_gold_200": "../llm-ehr-hallucination/output/step9_v2/sample200_with_gold.csv"
+    "calibration_100": "data/ground_truth/calibration_100.csv"
   },
   "models": [
     "biomistral-7b",
@@ -57,9 +55,10 @@
     "legacy_step2_scripts": "provenance_and_human_judge_validation_only"
   },
   "human_judge": {
-    "raw_source": "datasets/external/all_users_openended_BioMistral-7B_1775740232208.csv",
-    "final_100": "output/step9_v2/sample100_gold_seed42.csv",
-    "extended_200": "output/step9_v2/sample200_with_gold.csv",
+    "calibration_100": "data/ground_truth/calibration_100.csv",
+    "calibration_100_provenance": "data/ground_truth/calibration_100_provenance.json",
+    "raw_human_export": "not retained in archive; only resolved human gold + GPT-4o label are kept",
+    "source_pool": "Sara/Jose unanimous agreement subset N=112; 100 sampled (seed 78)",
     "binary_mapping": "Answer Quality == 5 -> 1; otherwise 0",
     "gpt_prompt_alignment_baseline": "Sara/Jose agreed subset, N=112"
   },

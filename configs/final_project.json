@@ -5,12 +5,11 @@
     "date_locked": "2026-05-28"
   },
   "raw_data": {
-    "ehrnoteqa_processed_jsonl": "../llm-ehr-hallucination/output/EHRNoteQA_processed.jsonl",
-    "human_judgment_csv": "../llm-ehr-hallucination/datasets/external/all_users_openended_BioMistral-7B_1775740232208.csv"
+    "ehrnoteqa_processed_jsonl": "../llm-ehr-hallucination/output/EHRNoteQA_processed.jsonl"
   },
   "processed_data": {
-    "human_gold_100_from_112_sara_jose_agreed": "../llm-ehr-hallucination/output/step9_v2/sample100_gold_seed42.csv",
-    "human_gold_200_extended": "../llm-ehr-hallucination/output/step9_v2/sample200_with_gold.csv"
+    "human_gpt_calibration_100": "data/ground_truth/calibration_100.csv",
+    "human_gpt_calibration_100_provenance": "data/ground_truth/calibration_100_provenance.json"
   },
   "local_copies": {
     "raw_dir": "data/raw",

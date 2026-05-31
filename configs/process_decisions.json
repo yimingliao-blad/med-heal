@@ -108,21 +108,14 @@
       "stage8_final_policy_note": "For Stage 8 reruns use deterministic T=0 where applicable; old Stage 1 GPT judge provenance remains T=0.1 for reproducing old GPT record."
     },
     "human_judge_biomistral": {
-      "selected_artifact": "datasets/external/all_users_openended_BioMistral-7B_1775740232208.csv",
-      "candidate_artifacts": [
-        "datasets/external/all_users_openended_BioMistral-7B_latest.csv",
-        "datasets/external/all_users_openended_BioMistral-7B_1775740232208.csv",
-        "datasets/human_judge_Stage2/*",
-        "output/final/tables/inter_rater_agreement*.tex"
-      ],
-      "decision_needed": "not final: use these files provisionally while confirming the LLM judge prompt; human source/final set may be revised later",
-      "selected_final_100_artifact": "output/step9_v2/sample100_gold_seed42.csv",
-      "selected_extended_200_artifact": "output/step9_v2/sample200_with_gold.csv",
-      "selected_output_schema": "raw rows keyed by User Name and Patient ID; derived gold files use patient_id plus reviewer binary columns, gpt, gold, n_raters",
-      "selected_metric_or_label_definition": "Answer Quality == 5 maps to correct=1; all other Answer Quality values map to incorrect=0",
-      "calibration_baseline": "Sara/Jose A\u2229B agreement subset from selected raw export, N=112, used to compare GPT judge prompt variants",
-      "final_human_set_policy": "provisional only; do not treat sample100 or sample200 as final conclusion until revised later",
-      "status": "provisional_evidence_only"
+      "selected_artifact": "data/ground_truth/calibration_100.csv",
+      "raw_human_export": "not retained in archive; only the resolved human gold + GPT-4o label are kept",
+      "selected_final_100_artifact": "data/ground_truth/calibration_100.csv",
+      "selected_final_100_provenance": "data/ground_truth/calibration_100_provenance.json",
+      "selected_output_schema": "patient_id, question, ground_truth, model_answer, sara, jose, human_gold, gpt_4o_label, agree",
+      "selected_metric_or_label_definition": "human_gold = Sara==Jose unanimous (Answer Quality == 5 -> 1; else 0); gpt_4o_label = Stage-1 binary GPT-4o judge",
+      "calibration_baseline": "data/ground_truth/calibration_100.csv: 100 sampled (seed 78) from the Sara/Jose A\u2229B unanimous N=112 pool; full-112 GPT-vs-gold agreement is 91.1% and this 100-subsample is 94% (see provenance)",
+      "status": "final_calibration_record"
     },
     "ground_truth_selection": {
       "selected_policy": null,
@@ -132,10 +125,9 @@
         "validated GPT-4o labels for full scale",
         "hybrid hierarchy"
       ],
-      "decision_needed": "not final: use Sara/Jose A\u2229B N=112 provisionally to compare GPT judge prompts; final ground truth policy will be revised later",
-      "human_baseline_artifact": "datasets/external/all_users_openended_BioMistral-7B_1775740232208.csv",
-      "human_baseline_policy": "Sara/Jose A\u2229B agreement subset, N=112, for GPT judge prompt selection",
-      "final_100_human_artifact": "output/step9_v2/sample100_gold_seed42.csv"
+      "human_baseline_artifact": "data/ground_truth/calibration_100.csv",
+      "human_baseline_policy": "Sara/Jose A\u2229B unanimous N=112 pool; 100 sampled (seed 78); human gold + GPT-4o label retained for the calibration baseline",
+      "final_100_human_artifact": "data/ground_truth/calibration_100.csv"
     },
     "icl_tests": {
       "selected_code_source": null,
