@@ -1,14 +1,12 @@
-# Pre-Atom Pipeline Refactor
+# Med-HEAL: Analyzing and Mitigating Hallucinations in Medical LLMs with Hallucination-Aware In-Context Learning
 
-This deposit is prepared for **ACM-BCB 2026**:
+Code and data archive for the **ACM-BCB 2026** paper by Yiming Liao, Zeno Franco, Jose Eduardo Lizarraga Mazaba, and Keke Chen.
 
-**Med-Heal: Analyzing and Mitigating Hallucinations in Medical LLMs with Hallucination-Aware In-Context Learning**
+Med-HEAL builds a clinically-grounded hallucination dataset from EHRNoteQA (MIMIC-IV discharge summaries), with BioMistral-7B answers labeled by a dual GPT-4o LLM-as-a-Judge + medical-student auditing pipeline, and studies two training-free mitigations — model **self-critique with selective regeneration** and **retrieval-augmented in-context learning (RA-ICL)**. Across five open-source LLMs (BioMistral, Llama-3.1, DeepSeek, Qwen2.5, Qwen3), self-critique yields statistically significant accuracy gains for three of five models. This repository packages the prompts, baselines, judge, regeneration, and self-correction variants for reproducible deposit; see [Citation](#citation) to cite this work.
 
-This folder packages the latest pre-atom hallucination work in a reproducible
-shape while keeping competing prompt, baseline, judge, regeneration, and
-self-correction variants visible for final selection.
+![Med-HEAL pipeline architecture](docs/assets/medheal_pipeline.png)
 
-The standalone orchestration, decision, parser, data-manifest, and statistical layers live in `src/pre_atom/` and `scripts/`. Legacy source data and generation outputs are read from the configured source repository, by default the sibling `../llm-ehr-hallucination` checkout.
+*Figure: the Med-HEAL pipeline — dataset construction with dual GPT-4o + human evaluation, then the training-free mitigations (self-critique regeneration and RA-ICL).*
 
 ## First Commands
 
@@ -96,5 +94,22 @@ Expected paired outcome columns:
 
 ```text
 fold,idx,patient_id,model,zeroshot_correct,final_correct
+```
+
+## Citation
+
+If you use Med-HEAL, please cite:
+
+```bibtex
+@inproceedings{liao2026medheal,
+  title     = {Med-HEAL: Analyzing and Mitigating Hallucinations in Medical LLMs with Hallucination-Aware In-Context Learning},
+  author    = {Liao, Yiming and Franco, Zeno and Lizarraga Mazaba, Jose Eduardo and Chen, Keke},
+  booktitle = {Proceedings of the ACM Conference on Bioinformatics, Computational Biology, and Health Informatics (ACM-BCB '26)},
+  year      = {2026},
+  address   = {Cosenza, Italy},
+  publisher = {Association for Computing Machinery},
+  doi       = {10.1145/3807503.3819453},
+  url       = {https://doi.org/10.1145/3807503.3819453}
+}
 ```
 

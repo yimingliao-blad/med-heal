@@ -11,7 +11,7 @@ Template placeholders (substituted by runner.py):
 
 Thinking-mode table per target (for future multi-target use):
     DS        — always thinks (no toggle)
-    Qwen3-8B  — per-sub-variant toggle (TBD per Stage III design)
+    Qwen3-8B  — enable_thinking=False for regen/correction
     Others    — N/A (no think mode)
 
 For the DS smoke test, all sub-variants run with the model's default
@@ -112,13 +112,13 @@ SUB_VARIANTS: dict[str, SubVariant] = {
 
 # Thinking-mode map — per-target per-sub-variant.
 # DS: always-on; caller doesn't need to toggle (model thinks regardless).
-# Qwen3-8B: the detection experiment used enable_thinking=True by default;
-#   a per-sub-variant toggle table may be set later in Stage III. For T0 we
-#   leave it as the model default (think-on) for now.
+# Qwen3-8B: keep thinking disabled for correction/regeneration runs. The
+#   downstream truncation detector and parsers expect the answer text, not a
+#   reasoning block.
 # Others: N/A.
 THINK_MODE: dict[str, dict[str, bool | None]] = {
     "deepseek-r1-distill-llama-8b": dict.fromkeys(SUB_VARIANTS),   # always thinks
-    "qwen3-8b": dict.fromkeys(SUB_VARIANTS, True),                       # think-on default
+    "qwen3-8b": dict.fromkeys(SUB_VARIANTS, False),
     "qwen2.5-7b-instruct": dict.fromkeys(SUB_VARIANTS),            # no think mode
     "llama-3.1-8b-instruct": dict.fromkeys(SUB_VARIANTS),          # no think mode
     "biomistral-7b": dict.fromkeys(SUB_VARIANTS),                  # no think mode
