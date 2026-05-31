@@ -1,0 +1,74 @@
+{
+  "project": {
+    "name": "pre_atom_ehrnoteqa_final_refactor",
+    "root_policy": "read original repo/data; write only under refactor/pre_atom_pipeline",
+    "date_locked": "2026-05-28"
+  },
+  "raw_data": {
+    "ehrnoteqa_processed_jsonl": "../llm-ehr-hallucination/output/EHRNoteQA_processed.jsonl",
+    "human_judgment_csv": "../llm-ehr-hallucination/datasets/external/all_users_openended_BioMistral-7B_1775740232208.csv"
+  },
+  "processed_data": {
+    "human_gold_100_from_112_sara_jose_agreed": "../llm-ehr-hallucination/output/step9_v2/sample100_gold_seed42.csv",
+    "human_gold_200_extended": "../llm-ehr-hallucination/output/step9_v2/sample200_with_gold.csv"
+  },
+  "local_copies": {
+    "raw_dir": "data/raw",
+    "processed_dir": "data/processed",
+    "runs_dir": "runs",
+    "reports_dir": "reports"
+  },
+  "models": [
+    "biomistral-7b",
+    "qwen2.5-7b-instruct",
+    "qwen3-8b",
+    "deepseek-r1-distill-llama-8b",
+    "llama-3.1-8b-instruct"
+  ],
+  "stage8": {
+    "script": "../llm-ehr-hallucination/src/step8_multimodel_icl/generate_step8.py",
+    "shared_script_for_all_models": true,
+    "conditions": [
+      "zeroshot",
+      "gtr_note_pos_k1",
+      "gtr_note_neg_k1",
+      "gtr_note_posneg_k1",
+      "cot_evidence",
+      "cot_conclusion",
+      "multiturn",
+      "gtr_note_any_unlabeled_k1"
+    ],
+    "folds": [0, 1, 2, 3, 4],
+    "temperature_policy": "T=0 for final rerun; legacy generator must be patched or replaced before final execution if it still hard-codes T=0.1"
+  },
+  "judge": {
+    "name": "stage1_binary_gpt4o",
+    "model": "gpt-4o",
+    "temperature": 0.1,
+    "max_tokens": 10,
+    "system": "You are a medical expert evaluating an AI model's answer to a clinical question.",
+    "output": "single digit only: 1=Correct, 0=Incorrect",
+    "mode": "sequential"
+  },
+  "parser": {
+    "model": "gpt-4o-mini",
+    "temperature": 0.0,
+    "role": "text extraction only; no medical decision making"
+  },
+  "multirun": {
+    "self_detect_raicl_verdict": {
+      "script": "scripts/run_natural_mini_parser_pipeline.py",
+      "decision_owner": "tested_model",
+      "parser_role": "gpt-4o-mini extraction only",
+      "default_detection_prompt": "cot_route",
+      "detection_temperature": 0.0
+    },
+    "regen_verdict": {
+      "script": "scripts/run_regen_verdict_mini.py",
+      "decision_owner": "tested_model",
+      "parser_role": "gpt-4o-mini extraction only",
+      "regen_temperature": 0.7,
+      "verdict_temperature": 0.7
+    }
+  }
+}

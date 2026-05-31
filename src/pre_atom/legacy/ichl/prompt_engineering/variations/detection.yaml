@@ -1,0 +1,56 @@
+# Detection-specific variation primitives for prompt iteration.
+#
+# Focus: anti-anchoring mutations (the dominant failure mode from Round 0,
+# where verdict-only prompts hit 30% INCORRECT recall across all three
+# candidates — the model reflexively accepts the target answer).
+#
+# Each primitive has:
+#   name    — unique label; matches a rule registered via @register_rule
+#   action  — human-readable description (also passed to LLM polisher as context)
+#   params  — optional kwargs for the rule implementation
+#
+# Category buckets: structural (anti-anchoring), role, output_format.
+
+structural:
+  # P9-style: force the model to engage with the notes independently
+  # before seeing the target answer. Historically +5pp on Qwen2.5.
+  - name: write_own_answer_first
+    action: "Prepend: 'First, read only the discharge summary and the question. Without looking at the model's answer, write what you think the correct answer SHOULD be in 2-3 sentences. Then compare to the model's answer.'"
+
+  # Pre-commitment: model predicts answer shape before being anchored.
+  - name: pre_commitment
+    action: "Before showing the model's answer, ask the evaluator to predict (in a sentence) what kind of answer the notes support. Only THEN show the answer to evaluate."
+
+  # Claim-by-claim verification (P2-style).
+  - name: claim_by_claim
+    action: "Instruct the evaluator to list 2-4 factual claims from the model's answer, verify each against the notes, then issue the final verdict."
+
+  # Order flip: present notes first, then the answer (instead of interleaved).
+  - name: notes_first
+    action: "Rearrange so discharge summary is the FIRST content after instructions; question and model-answer come after, not before."
+
+  # Counter-anchor: explicit warning about the bias.
+  - name: counter_anchor
+    action: "Add an explicit reminder: 'Models frequently make subtle factual errors in discharge QA. Assume the answer may be wrong and actively search for contradictions; do not default to accepting it.'"
+
+role:
+  # Skeptical auditor frame (replaces 'medical expert').
+  - name: role_skeptical_auditor
+    action: "Change the evaluator role to a skeptical medical auditor whose job is to find errors, not to affirm correctness."
+
+  # Adversarial QA frame.
+  - name: role_adversarial
+    action: "Change the evaluator role to one actively searching for hallucinations: 'Your task is to find any unsupported claim. If none exist, say CORRECT; otherwise INCORRECT.'"
+
+output_format:
+  # Enforce the output rule at both the top and bottom of the prompt.
+  - name: repeat_output_rule
+    action: "State the strict single-word output requirement at BOTH the beginning and the end of the prompt."
+
+  # Two-step: reason then verdict (still ends with a single token).
+  - name: reason_then_verdict
+    action: "Ask the evaluator to first write a 1-sentence reason, then on a new line output exactly one word: CORRECT or INCORRECT."
+
+  # Chain-of-verification: 2-3 yes/no questions before verdict.
+  - name: chain_of_verification
+    action: "Ask 2-3 yes/no verification questions about specific claims in the answer (grounded in notes). Then output the single-word verdict."

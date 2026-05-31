@@ -1,0 +1,78 @@
+{
+  "paths": {
+    "source_repo_root": "../llm-ehr-hallucination",
+    "output_dir": "output",
+    "reports_dir": "reports",
+    "processed_ehrnoteqa": "../llm-ehr-hallucination/output/EHRNoteQA_processed.jsonl",
+    "folds_dir": "../llm-ehr-hallucination/output/folds",
+    "step8_output_dir": "../llm-ehr-hallucination/output/step8",
+    "step9_v2_output_dir": "../llm-ehr-hallucination/output/step9_v2",
+    "human_eval_csv": "../llm-ehr-hallucination/datasets/external/all_users_openended_BioMistral-7B_1775740232208.csv",
+    "human_gold_100": "../llm-ehr-hallucination/output/step9_v2/sample100_gold_seed42.csv",
+    "human_gold_200": "../llm-ehr-hallucination/output/step9_v2/sample200_with_gold.csv"
+  },
+  "models": [
+    "biomistral-7b",
+    "qwen2.5-7b-instruct",
+    "qwen3-8b",
+    "deepseek-r1-distill-llama-8b",
+    "llama-3.1-8b-instruct"
+  ],
+  "conditions": [
+    "zeroshot",
+    "gtr_note_pos_k1",
+    "gtr_note_neg_k1",
+    "gtr_note_posneg_k1",
+    "cot_evidence",
+    "cot_conclusion",
+    "multiturn",
+    "gtr_note_any_unlabeled_k1"
+  ],
+  "folds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "selected": {
+    "baseline": "zeroshot",
+    "judge": "gpt4o_stage1_binary",
+    "self_correction": "step9_v2_D2_union_V2",
+    "stats_input": "output/paired_outcomes.csv"
+  },
+  "servers": {
+    "vllm_port": 8003,
+    "qwen32b_url": "http://192.168.68.107:8090/v1/chat/completions"
+  },
+  "dataset": {
+    "start_point": "processed_ehrnoteqa",
+    "raw_preprocessing": "provenance_only",
+    "maintain_relative_structure": true
+  },
+  "zeroshot": {
+    "selected_code_source": "src/step8_multimodel_icl/generate_step8.py",
+    "shared_script_for_all_models": true,
+    "start_model": "biomistral-7b",
+    "legacy_step2_scripts": "provenance_and_human_judge_validation_only"
+  },
+  "human_judge": {
+    "raw_source": "datasets/external/all_users_openended_BioMistral-7B_1775740232208.csv",
+    "final_100": "output/step9_v2/sample100_gold_seed42.csv",
+    "extended_200": "output/step9_v2/sample200_with_gold.csv",
+    "binary_mapping": "Answer Quality == 5 -> 1; otherwise 0",
+    "gpt_prompt_alignment_baseline": "Sara/Jose agreed subset, N=112"
+  },
+  "judge_prompt": {
+    "status": "working_confirmation",
+    "name": "stage1_binary_gpt4o",
+    "system": "You are a medical expert evaluating an AI model's answer to a clinical question.",
+    "output": "single digit only: 1=Correct, 0=Incorrect",
+    "primary_sources": [
+      "src/step3_evaluation/stage1_gpt4_eval_combined.py",
+      "src/step9_self_correction/v2/judge.py"
+    ],
+    "do_not_use_for_new_labels": "src/step8_multimodel_icl/evaluate_step8.py CORRECT/REASON prompt",
+    "alignment_baseline": "Sara/Jose A\u2229B N=112 provisional baseline"
+  }
+}

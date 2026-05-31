@@ -1,0 +1,70 @@
+# Detection — verdict-only seed prompts (Round 0 candidates).
+#
+# Task: binary classification of a model's answer against a discharge note.
+# Output: exactly one token — CORRECT or INCORRECT.
+#
+# Template variables (populated by the pilot runner):
+#   {note}         — concatenated discharge summary block ([Note 1]...[Note 2]...)
+#   {question}     — EHRNoteQA question
+#   {model_answer} — the target model's zeroshot answer being evaluated
+#
+# Note: Step-8 zeroshot outputs are free-form text (no multiple-choice
+# letters), so these templates do NOT include a {choices} block. This matches
+# the legacy P1/P9/P12 template shape, which simplifies head-to-head compare.
+#
+# Related Notion pages:
+#   - "Claude: Plan: Detection — Current Design (Verdict-Only)"
+#   - "Claude: Plan: Detection — Pilot Runner Design"
+# Provenance dated 2026-04-22; approved by user after discussion of A/B/C framings.
+
+- name: A1_minimal_neutral
+  purpose: "Verdict-only, neutral minimal framing — shortest viable prompt."
+  tags: [verdict_only, minimal, neutral]
+  provenance: "Draft 2026-04-22, Plan: Detection — Current Design (Verdict-Only)"
+  template: |
+    Discharge summary:
+    {note}
+
+    Question: {question}
+
+    Model's answer: {model_answer}
+
+    Evaluate whether the model's answer is correct based on the discharge summary.
+    Reply with exactly one word: CORRECT or INCORRECT.
+
+- name: A2_role_strict_notes
+  purpose: "Verdict-only, role-framed with 'strictly from notes' grounding constraint."
+  tags: [verdict_only, role_framed, grounded]
+  provenance: "Draft 2026-04-22, Plan: Detection — Current Design (Verdict-Only)"
+  template: |
+    You are a medical expert evaluator. Judge the model's answer strictly from the
+    information contained in the discharge summary below. Do not rely on outside
+    medical knowledge or assumptions not supported by the notes.
+
+    Discharge summary:
+    {note}
+
+    Question: {question}
+
+    Model's answer: {model_answer}
+
+    Your final output must be EXACTLY ONE WORD, with no punctuation or explanation:
+    CORRECT or INCORRECT.
+
+- name: A3_task_strict_output
+  purpose: "Verdict-only, task-framed with explicit strict-output contract."
+  tags: [verdict_only, task_framed, strict_output]
+  provenance: "Draft 2026-04-22, Plan: Detection — Current Design (Verdict-Only)"
+  template: |
+    Task: binary classification. Is the model's answer correct given the discharge
+    summary?
+
+    Discharge summary:
+    {note}
+
+    Question: {question}
+
+    Model's answer: {model_answer}
+
+    Output format (strict): a single line containing only the word CORRECT or the
+    word INCORRECT. No explanations, no reasoning, no extra tokens.
